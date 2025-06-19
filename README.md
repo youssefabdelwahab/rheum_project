@@ -8,3 +8,6 @@ or
 
 python setup_env.py
 
+
+
+ENV files are being tracked by gitignore and will not be pushed 

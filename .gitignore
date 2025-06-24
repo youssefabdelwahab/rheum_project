@@ -3,3 +3,7 @@ research_paper_database/
 .env
 
 .robust_lab/
+
+robust_py311/
+
+paper_extracts/

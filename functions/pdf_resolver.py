@@ -1,3 +1,26 @@
+"""
+pdf_resolver.py
+================
+
+Asynchronous DOI / landing‑page → PDF resolver supporting many major
+publishers (Springer, OUP, Wiley, F1000Research, Hindawi, etc.).
+
+The class exposes an **async context‑manager** interface so HTTP resources
+are cleaned up automatically:
+
+```python
+async with PDFResolver() as resolver:
+    pdf_url = await resolver.get_pdf(doi, landing_url, paper_id)
+```
+
+If no PDF can be located it raises :class:`CantDownload`; if neither a DOI
+nor a landing URL is supplied it raises :class:`MissingIdentifier`.
+"""
+
+
+
+
+
 
 import asyncio , re , httpx
 from bs4 import BeautifulSoup
@@ -14,6 +37,9 @@ from urllib.parse import quote , urlparse , urljoin
 import httpx
 import random
 load_dotenv()
+
+
+
 
 
 
@@ -53,9 +79,35 @@ class PDFResolver:
 )
     wiley_token = os.getenv("wiley_api_token")
 
-    class CantDownload(RuntimeError):
-        pass
-
+    class CantDownload(Exception):
+        """
+        Raised when the resolver failed to find a downloadable PDF.
+        Carries the DOI and the final landing URL we ended up on.
+        """
+        def __init__(self, doi:str | None, landing:str):
+            self.doi = doi
+            self.landing = landing
+            super().__init__(f"Could not download PDF for DOI {doi} from {landing}")
+    
+    class PDFResolverError(Exception): 
+        """Base class for PDF resolver errors."""
+        pass 
+        
+    class MissingIdentifier(PDFResolverError):
+        """Neither DOI nor landing URL was supplied."""
+        pass 
+    
+    class CantDownload(Exception):
+        """
+        Raised when the resolver failed to find a downloadable PDF.
+        Carries the DOI and the final landing URL we ended up on.
+        """
+        def __init__(self, doi:str | None, landing:str):
+            self.doi = doi
+            self.landing = landing
+            super().__init__(f"Could not download PDF for DOI {doi} from {landing}")
+    
+    
     def __init__(self, *, headers: Optional[dict] = None, timeout: int = 30):
         self.headers = headers or {"User-Agent": "Mozilla/5.0 (easy-pdf-resolver/1.2)"}
         self.timeout = timeout
@@ -75,9 +127,16 @@ class PDFResolver:
             self._client = httpx.AsyncClient(headers=self.headers, follow_redirects=True, timeout=self.timeout)
         return self._client
 
-    async def get_pdf(self, doi: str) -> str:
+    async def get_pdf(self, doi, landing_url, paper_id ) -> str:
+        print(f"Attempting to resolve pdf of paper_id: {paper_id}")
         client = self._client_required()
-        landing = str((await client.get(f"https://doi.org/{doi}")).url)
+        if doi: 
+            landing = str((await client.get(f"https://doi.org/{doi}")).url)
+        elif landing_url: 
+            landing = str(landing_url)
+        else:
+            return self.MissingIdentifier()
+        print(f"Attempting to resolve pdf from : {landing}")
 
         if self._SPRINGER_HOST in landing:
             for url in self._springer_candidates(landing, doi):
@@ -109,18 +168,17 @@ class PDFResolver:
         if anchor:
             return anchor
 
-        cr_pdf = self._crossref_fallback(doi)
-        if cr_pdf:
-            return cr_pdf
+        if doi and (cross := self._crossref_fallback(doi)):
+            return cross
         
-        browser_pdf = await self.fetch_pdf_with_browser(doi)
+        browser_pdf = await self.fetch_pdf_with_browser(doi , landing)
         if browser_pdf:
             return browser_pdf
         
 
-        raise self.CantDownload(f"Cant Downlaod  {doi} → {landing}")
+        raise self.CantDownload(doi , landing)
 
-    async def _springer_candidates(self, landing: str, doi: str) -> List[str]:
+    def _springer_candidates(self, landing: str, doi: str) -> List[str]:
         base = f"https://{self._SPRINGER_HOST}"
         candidates = [f"{base}/content/pdf/{doi}.pdf"]
         if landing.endswith(("fulltext.html", "fulltext.htm")):
@@ -221,11 +279,11 @@ class PDFResolver:
         
         
     async def _karger_pdf(self, landing: str, doi: str) -> Optional[str]:
-        clinet = self._client_required()
+        client = self._client_required()
         
         #must get article id 
         
-        html = (await clinet.get(landing)).text
+        html = (await client.get(landing)).text
         soup = BeautifulSoup(html, "html.parser")
         tag = soup.find("meta", attrs={"name": "dc.identifier"})
         if not tag or not tag.get("data-article-id"):
@@ -321,7 +379,7 @@ class PDFResolver:
                 best = url
         return best
     
-    async def fetch_pdf_with_browser(self ,doi: str) -> Optional[str]:
+    async def fetch_pdf_with_browser(self , doi, landing) -> Optional[str]:
         EZPROXY_PREFIX = "https://ezproxy.lib.ucalgary.ca/login?url="
         JOURNAL_PDF_SELECTORS = {
         "bmj.com": 'a[title="Download this article as a PDF"]',
@@ -344,7 +402,10 @@ class PDFResolver:
     "Mozilla/5.0 (X11; Linux x86_64) Gecko/20100101 Firefox/125.0",
 ]
         client = self._client_required()
-        landing_url = str((await client.get(f"https://doi.org/{doi}")).url)
+        if doi:
+            landing_url = str((await client.get(f"https://doi.org/{doi}")).url)
+        else:
+            landing_url = str(landing)
         proxied_url = EZPROXY_PREFIX + quote(landing_url, safe="")
         domain = urlparse(landing_url).netloc
 

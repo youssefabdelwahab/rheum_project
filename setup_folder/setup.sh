@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Step 1: Create virtual environment
-python3 -m venv .robust_lab
+python3.11 -m venv .robust_lab
 
 # Step 2: Activate the virtual environment
 source .robust_lab/bin/activate

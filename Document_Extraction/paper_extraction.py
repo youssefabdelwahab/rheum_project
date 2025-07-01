@@ -37,11 +37,10 @@ parent_folder = os.path.abspath(os.path.join(cwd, ".."))
 sys.path.append(parent_folder)
 from typing import Optional
 from pathlib import Path
-from functions import pdf_resolver 
-import functions.pdf_parser as pdf_parser
+from functions.extraction_functions import extract_text_with_pdf_resolver
 
 
-paper_info_file = "../research_paper_database/paper_journal_info.csv"
+paper_info_file = os.getenv("paper_info_file_path")
 
 
 repo_root = Path.cwd().parent
@@ -77,50 +76,44 @@ async def extracting_pdf(extracted_queue: asyncio.Queue,unextracted_queue: async
             "paper_text":"", 
             "resolver_error":""
         }
-        
-            async with pdf_resolver.PDFResolver() as resolver:
-                try:
-                    pdf_url = await resolver.get_pdf(paper_doi, paper_link, paper_id)
-                
-                except resolver.MissingIdentifier as e: 
-                    print("No DOI or Paper Link available for paper, skipping extraction")
-                    paper_dict.update({
-                    "resolver_error": str(e)
-                    })
+            pdf_text = None
+            pdf_url = None
+            try:
+                pdf_text = await extract_text_with_pdf_resolver(doi = paper_doi, paper_id= paper_id , selector_timeout=40000)
+                if pdf_text is None: 
+                    paper_dict['resolver_error'] = "Unknown Resolver Error"
                     await unextracted_queue.put(paper_dict)
                     continue
-                except resolver.CantDownload as e: 
-                    print(f"PDF could not be downloaded for DOI {paper_doi}: {e} ... storing landing_url")
-                    paper_dict.update({
-                    "pdf_url":e.landing,
-                "   resolver_error": str(e)
-                    })
-                    await unextracted_queue.put(paper_dict)
-                    continue
-            
-                except Exception as e:
-                    print(f"Error extracting paper {e}")
-                    paper_dict.update({
-                "pdf_url":pdf_url,
-                "resolver_error": str(e)
-                })
-                    await unextracted_queue.put(paper_dict)
-                    continue
-                else:
-                    text = await pdf_parser.extract_text_from_pdf_url(str(pdf_url))
-                    if not text: 
-                        paper_dict.update({
-                    "pdf_url": pdf_url
-                    })
+                if isinstance(pdf_text, dict): 
+                    if "Missing Doi Error" in pdf_text:
+                        paper_dict['resolver_error'] = pdf_text.get("Missing Doi Error")
+                        paper_dict['pdf_url'] = pdf_url
+                        paper_dict['paper_text'] = pdf_text
                         await unextracted_queue.put(paper_dict)
                         continue
-                    print(f"Extracted paper {paper_doi}")
-                    paper_dict.update({
-                    "pdf_url":pdf_url,
-                    "paper_text": text
-                    })
-                    await extracted_queue.put(paper_dict)
-    
+                    elif "url" in pdf_text: 
+                        pdf_url = pdf_text.get("url")
+                        paper_dict['resolver_error'] = "Failed to Download PDF"
+                        paper_dict['url'] = pdf_url
+                        pdf_text = None
+                        await unextracted_queue.put(paper_dict)
+                        continue
+            except  asyncio.TimeoutError as e:
+                print("Async timeout fetching published PDF for %s: %s", paper_id) # change to log
+                paper_dict['resolver_error'] = "Async Timeout Error"
+            except Exception as e:
+                print(f"Error extracting published paper: {paper_id}")
+                paper_dict['resolver_error'] = str(e)
+                await unextracted_queue.put(paper_dict)
+                continue
+            if pdf_text: 
+                print(f"Extracted paper {paper_doi}")
+                paper_dict.update({
+                "paper_text":pdf_text
+                })
+                
+                await extracted_queue.put(paper_dict)
+
 
 
 async def writer(path: Path, queue: asyncio.Queue) -> None:

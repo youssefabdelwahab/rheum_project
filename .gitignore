@@ -11,3 +11,11 @@ robust_py311/
 paper_extracts/
 
 Document_Extraction/rp_pull_test.ipynb
+
+functions/pdf_parser.py 
+
+functions/pdf_resolver.py
+
+archived_papers/
+
+Logs/

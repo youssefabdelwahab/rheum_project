@@ -4,11 +4,13 @@ import sys
 import csv
 import asyncio
 sys.path.append(os.path.abspath('..'))
-from functions.paper_to_doi import get_article_info_from_title
+from modules.paper_to_doi import get_article_info_from_title
+from dotenv import load_dotenv
+load_dotenv()
 
 
 
-async def pulling_info ( row_data , queue): 
+async def pulling_info (row_data , queue): 
     
     for row in row_data: 
         print(f"Processing paper: {row[2]}")
@@ -49,8 +51,8 @@ async def csv_writer(file_path , queue):
             
 async def main():
 
-    research_paper_info_file = "../research_paper_database/paper_journal_info.csv"
-    database_file= "../research_paper_database/Living database of RA trials September 2024_1_2_final_withCRSID_gh.csv"
+    research_paper_info_file = os.getenv("paper_info_file_path")
+    database_file= os.getenv("paper_database_file_path")
     
     with open(database_file, newline='') as paper_database:
         reader = csv.reader(paper_database)

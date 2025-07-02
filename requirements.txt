@@ -114,6 +114,7 @@ pydantic-settings==2.9.1
 pyee==12.1.1
 pygments==2.19.1
 pylatexenc==2.10
+PyMuPDF
 pypdfium2==4.30.1
 pysocks==1.7.1
 pytesseract==0.3.13

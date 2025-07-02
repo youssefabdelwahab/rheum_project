@@ -30,18 +30,26 @@ Output
 
 
 
-import os, sys,asyncio,json
+import os, sys,asyncio,json, csv
 import aiofiles , aiocsv
-cwd = os.getcwd()
-parent_folder = os.path.abspath(os.path.join(cwd, ".."))
-sys.path.append(parent_folder)
+# cwd = os.getcwd()
+# parent_folder = os.path.abspath(os.path.join(cwd, ".."))
+# sys.path.append(parent_folder)
+
+## Import utils from utils folder
+current_dir = os.path.dirname(os.path.abspath(__file__))
+print(current_dir)
+# Check if utils is a sibling folder (local dev)
+utils_path_local = os.path.abspath(os.path.join(current_dir, '..'))
+sys.path.append(utils_path_local)
+
 from typing import Optional
 from pathlib import Path
 from functions import pdf_resolver 
 import functions.pdf_parser as pdf_parser
 
 
-paper_info_file = "../research_paper_database/paper_journal_info.csv"
+paper_info_file = "research_paper_database/paper_journal_info.csv"
 
 
 repo_root = Path.cwd().parent
@@ -57,6 +65,8 @@ for folder in (extract_save_folder, unextracted_save_folder):
 extract_file_path = os.path.join(extract_save_folder, "extracted_paper_info.jsonl")
 unextracted_file_path = os.path.join(unextracted_save_folder, "unextracted_paper_info.jsonl")
 
+extract_csv_path = os.path.join(extract_save_folder, "extracted_paper_info.csv")
+unextracted_csv_path = os.path.join("unextracted_paper_info.csv")
 
 
 async def extracting_pdf(extracted_queue: asyncio.Queue,unextracted_queue: asyncio.Queue,) -> None:
@@ -133,7 +143,24 @@ async def writer(path: Path, queue: asyncio.Queue) -> None:
                 break
             await f.write(json.dumps(item) + "\n")
 
+async def writer_csv(path: Path, queue: asyncio.Queue, fieldnames: list[str]) -> None:
+    """Write each item from the queue to a csv file."""
+    write_header = not os.path.exists(path)    
+    async with aiofiles.open(path, 'a', newline = '') as f:
+        writer = None
+        while True:
+            item = await queue.get()
+            if item is None:
+                break
 
+            line = ','.join('"{}"'.format(str(item.get(key, "")).replace('"','""')) for key in fieldnames)
+
+            if write_header:
+                header_line = ','.join(f'"{h}"' for h in fieldnames)
+                await f.write(header_line + '\n')
+                write_header = False
+
+            await f.write(line + '\n')
 
 async def main(): 
     
@@ -141,21 +168,24 @@ async def main():
 
     extracted_q = asyncio.Queue()
     unextracted_q = asyncio.Queue()
-    
-    
-        
+          
     extract_task = asyncio.create_task(
         extracting_pdf(extracted_q , unextracted_q)
     )
     
     e_writer_task = asyncio.create_task(writer(extract_file_path, extracted_q))
     ue_writer_task = asyncio.create_task(writer(unextracted_file_path, unextracted_q))
+
+    csv_fields = ["id", "title", "doi", "crossref_paper_link", "pdf_url", "paper_text", "resolver_error"]
+    e_writer_csv = asyncio.create_task(writer_csv(extract_csv_path, extracted_q, csv_fields))
+    ue_writer_csv = asyncio.create_task(writer_csv(unextracted_csv_path, unextracted_q, csv_fields))
     
     await extract_task
-    await extracted_q.put(None)
-    await unextracted_q.put(None)
+    for q in (extracted_q, unextracted_q):
+        await q.put(None)
+        await q.put(None)
     
-    await asyncio.gather(e_writer_task, ue_writer_task)
+    await asyncio.gather(e_writer_task, ue_writer_task, e_writer_csv, ue_writer_csv)
     
 
 if __name__ == "__main__":

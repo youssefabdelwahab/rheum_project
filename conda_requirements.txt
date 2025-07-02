@@ -1,0 +1,34 @@
+# Python
+python=3.10  # Better compatibility than 3.11 or 3.12
+
+# Scientific stack
+numpy=1.26
+pandas=2.2
+scikit-image=0.22
+scipy=1.12
+h5py
+pillow
+openpyxl
+matplotlib
+xlsxwriter
+tifffile
+
+# Jupyter ecosystem
+ipykernel
+ipython
+ipywidgets
+jupyterlab
+jupyterlab-widgets
+jupyterlab-server
+jupyter-server
+jupyter-core
+jupyter-client
+widgetsnbextension
+nbformat
+nbconvert
+notebook
+
+# TensorFlow - fallback to older stable version
+tensorflow=2.12
+keras
+protobuf

@@ -1,0 +1,19 @@
+{
+    "python.defaultInterpreterPath": "C:\\Users\\Achu\\anaconda3\\envs\\rheum-research-new-311\\python.exe",
+    "terminal.integrated.env.windows": {
+        "PATH": "C:\\Users\\Achu\\anaconda3\\envs\\rheum-research-new-311;${env:PATH}"
+    },
+    "terminal.integrated.defaultProfile.windows": "PowerShell",
+    "terminal.integrated.profiles.windows": {
+        "PowerShell": {
+            "source": "PowerShell",
+            "icon": "terminal-powershell",
+            "args": [
+            "-NoExit",
+            "-Command",
+            "conda activate rheum-research-new-311"
+            ]
+        }
+    }
+    // "python.envFile": "${workspaceFolder}/env/aws.env"
+  }

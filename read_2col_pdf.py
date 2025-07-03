@@ -2,6 +2,8 @@ import fitz
 import re
 import os
 import numpy as np
+import json
+import pandas as pd
 
 def is_full_width(block, page_width, threshold=0.8):
     """
@@ -109,6 +111,29 @@ def extract_text_two_cols(pdf_path):
 
     return full_text
 
+def extract_json_paper_text(jsonl_file_path):
+    """
+    Extract the paper_text content from each line in a .jsonl file
+    The text is then run through a function to obtain the clinical trial numbers 
+    """
+    results = []
+    with open(jsonl_file_path, 'r', encoding = 'utf-8') as f:
+        for line_number, line in enumerate(f, start=1):
+            try:
+                data = json.loads(line)
+                if 'paper_text' in data and 'id' in data:
+                    trial_id = extract_trial_ids(data['paper_text'])
+                    results.append({
+                        'id' : data['id'],
+                        'trial_id' : trial_id
+                    })
+                else:
+                    print(f"'paper_text' key missing at line {line_number}")
+            except json.JSONDecodeError as e:
+                print(f"Error parsing line {line_number}: {e}")
+    
+    return pd.DataFrame(results)
+
 def extract_trial_ids(text: str):
     """
     match the most common patterns of the clinical trial identfiers 
@@ -119,6 +144,7 @@ def extract_trial_ids(text: str):
         #EU CT Register
         r'\bEUCTR\d{4}-\d{6}-\d{2}(?:-[A-Z]{2,3})?\b',
         r'\bEudraCT\s?\d{4}-\d{6}-\d{2}\b',
+        r'EUCTR\d{4}-\d{6}-\d{2}',
         #ISRCTN
         r'\bISRCTN\d{6,8}\b',
         #UMIN (Japan)
@@ -164,7 +190,13 @@ def extract_trial_ids(text: str):
         r'\bUCTR\d{11,15}\b',
         r'\bUCTR-\d{5,7}\b',
         #ISRCTN
-        r"\bISRCTN\d{6,8}\b"
+        r"\bISRCTN\d{6,8}\b",
+        #Others,
+        r"CTRI/\d{4}/\d{2}/\d{6}",
+        r"\b[A-Z]{2}\d{4}\b",
+        r"\bDARWIN\s*\d+\b",
+        r"\bNTR\d+\b",
+        r"\bUMIN\d{9}\b"
     ]
 
     trial_ids = []
@@ -200,3 +232,37 @@ if __name__ == "__main__":
         print("For PDF:", pdf_path)
         print("Extracted trial numbers:", trial_ids_pdf)
 
+
+    df_trials = extract_json_paper_text('database_testing\extracted_paper_info_thread.jsonl')
+    print(df_trials.head())
+
+
+    columns_to_merge = ['recordid.', 'clinical_reg_no']
+    df = pd.read_excel('database_testing\Living database of RA trials_Latest version to share_withCRSID_2025.xlsx', usecols = columns_to_merge)
+
+    df_trials['id'] = df_trials['id'].astype(str)
+    df['recordid.'] = df['recordid.'].astype(str)
+
+    merged_df = pd.merge(df_trials, df, left_on = "id", right_on = "recordid.", how = "left")
+
+    print(merged_df.head(20))
+
+    def is_clinical_id_in_trial_id(row):
+        clinical_str = row.get('clinical_reg_no')
+        trial_ids = row.get('trial_id')
+
+        if (pd.isna(clinical_str) or clinical_str == ''):
+            clinical_ids = []
+        else:
+            clinical_ids = [x.strip() for x in re.split(r'[;,]', clinical_str)]
+
+        if not clinical_ids and not trial_ids:
+            return True
+        
+        if isinstance(trial_ids, list) and clinical_ids:
+            return all(cid in trial_ids for cid in clinical_ids)   
+
+    merged_df['clinical_id_match'] = merged_df.apply(is_clinical_id_in_trial_id, axis = 1 )
+    print(merged_df.head(20))
+
+    merged_df.to_csv("database_testing\match_output.csv", index = False)

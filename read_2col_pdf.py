@@ -123,9 +123,11 @@ def extract_json_paper_text(jsonl_file_path):
                 data = json.loads(line)
                 if 'paper_text' in data and 'id' in data:
                     trial_id = extract_trial_ids(data['paper_text'])
+                    accepted_dates = extract_accepted_dates(data['paper_text'])
                     results.append({
                         'id' : data['id'],
-                        'trial_id' : trial_id
+                        'trial_id' : trial_id,
+                        'accepted_dates' : accepted_dates 
                     })
                 else:
                     print(f"'paper_text' key missing at line {line_number}")
@@ -206,6 +208,44 @@ def extract_trial_ids(text: str):
 
     return list(set(trial_ids))
 
+def extract_accepted_dates(text : str):
+    """
+    Extract 'Accepted for publication' date from JSONL record and write to CSV
+    Priority:
+    1. Accepted
+    2. Accessed
+    3. Generic Month Year
+    """
+    # Priority 1: Accepted
+    accepted_pattern = re.compile(
+        r"(?:Accepted(?: for publication)?)\s*[:,-]?\s*(\w+\s+\d{1,2},\s+\d{4})",
+        re.IGNORECASE
+    )
+    match = accepted_pattern.search(text)
+    if match:
+        return match.group(1)
+
+    # Priority 2: Accessed
+    accessed_pattern = re.compile(
+        r"(?:Accessed(?: on| Date)?)\s*[:,-]?\s*(\w+\s+\d{1,2},\s+\d{4})",
+        re.IGNORECASE
+    )
+    match = accessed_pattern.search(text)
+    if match:
+        return match.group(1)
+
+    # Priority 3: Generic Month Year (e.g., February 2020)
+    month_year_pattern = re.compile(
+        r"\b(?:January|February|March|April|May|June|July|August|September|October|November|December|"
+        r"Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\s+\d{4}\b",
+        re.IGNORECASE
+    )
+    match = month_year_pattern.search(text)
+    if match:
+        return match.group()
+
+    return None
+
 def extract_from_pdf_or_text(input_source: str):
     """
     Automatically detects whether the input is a path to the pdf file or plain text
@@ -221,6 +261,7 @@ def extract_from_pdf_or_text(input_source: str):
 
     trial_ids = extract_trial_ids(text)
     return trial_ids
+
 
 
 if __name__ == "__main__":

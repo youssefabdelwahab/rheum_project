@@ -108,6 +108,14 @@ def extract_trial_ids(text: str):
     print(trial_ids)
     return list(set(trial_ids))
 
+def extract_accepted_dates(text : str):
+    """
+    Extract 'Accepted for publication' date from JSONL record and write to CSV
+    """
+    date_pattern = re.compile(r"Accepted for publication[\s,:-]*(\w+\s+\d{1,2},\s+\d{4})", re.IGNORECASE)
+    match = date_pattern.search(text)
+    return match.group(1) if match else None
+    
 def extract_text_from_pdf(pdf_path: str):
     try:
         doc = fitz.open(pdf_path)
@@ -118,7 +126,7 @@ def extract_text_from_pdf(pdf_path: str):
     
 def analyze_url(url: str):
     if pd.isna(url) or not isinstance(url, str):
-        return "unreachable", []
+        return "unreachable", [], None
     
     try:
         response = requests.get(url, timeout=20, stream = True)
@@ -127,7 +135,7 @@ def analyze_url(url: str):
         if "application/pdf" in content_type or url.lower().endswith(".pdf"):
             pdf_bytes = response.content
             if not pdf_bytes:
-                return "pdf", []
+                return "pdf", [], None
             with open(temp_pdf, "wb") as f:
                 f.write(pdf_bytes)
 
@@ -136,27 +144,31 @@ def analyze_url(url: str):
             print(text)
             os.remove(temp_pdf)
             ids = extract_trial_ids(text)
-            return "pdf", ids
+            accepted_dates = extract_accepted_dates(text)
+            return "pdf", ids, accepted_dates
         else:
-            return "html", []
+            return "html", [], None
     except Exception as e:
         print(f"URL failed: {url} | {e}")
-        return "unreachable", []
+        return "unreachable", [], None
     
 def process_csv(input_csv, url_column):
     df = pd.read_csv(input_csv)
 
     content_types = []
     extracted_infos = []
+    accepted_dates = []
 
     for url in tqdm(df[url_column], desc= "Processing URLs"):
-        download_pdf(url)
-        ctype, ids = analyze_url(url)
+        ctype, ids, date = analyze_url(url)
         content_types.append(ctype)
         extracted_infos.append(", ". join(ids))
+        accepted_dates.append(date)
 
     df[content_type_column] = content_types
     df[regex_column] = extracted_infos
+    df["accepted_date"] = accepted_dates
+
     df.to_csv(output_csv, index = False)
     print(f"\n Updated {input_csv} with content type and extracted regex info")
 

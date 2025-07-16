@@ -8,13 +8,29 @@ from modules.paper_to_doi import get_article_info_from_title
 from dotenv import load_dotenv
 load_dotenv()
 
+def extract_title_and_info(citation: str) -> str:
+    # Split the citation by period
+    parts = [p.strip() for p in citation.split('.') if p.strip()]
+    
+    # Expect: [authors, title, journal/info, ...]
+    if len(parts) >= 3:
+        # Join title and journal/info
+        return f"{parts[1]}. {parts[2]}.{parts[3]}"
+    elif len(parts) == 2:
+        # If no journal info, return just the title
+        return parts[1]
+    else:
+        return ""
+
+
 
 
 async def pulling_info (row_data , queue): 
     
     for row in row_data: 
         print(f"Processing paper: {row[2]}")
-        paper_info = await asyncio.to_thread(get_article_info_from_title, str(row[2])) or {}
+        cleaned_title = extract_title_and_info(row[2])
+        paper_info = await asyncio.to_thread(get_article_info_from_title, str(cleaned_title)) or {}
         if not paper_info:
             print(f"No information found for paper: {row[2]}")
             continue

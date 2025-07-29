@@ -21,3 +21,17 @@ df = pd.DataFrame({
 })
 
 print(df.head())
+
+
+df_2 = pd.read_excel('database_testing\Living database of RA trials_Latest version to share_withCRSID_2025.xlsx', usecols = ['recordid.','abstract'])
+print(df_2.head())
+
+df['id'] = df['id'].astype(str)
+df_2['recordid.'] = df_2['recordid.'].astype(str)
+
+df_merged = df.merge(df_2, left_on = 'id', right_on = 'recordid.' , how = 'left')
+df_merged = df_merged.drop(columns = ['recordid.'])
+
+print(df_merged.head())
+
+df_merged.to_csv('research_paper_database/csv_for_labeling.csv', index=False)

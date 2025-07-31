@@ -169,7 +169,8 @@ def process_csv(input_csv, url_column):
     df[regex_column] = extracted_infos
     df["accepted_date"] = accepted_dates
 
-    df.to_csv(output_csv, index = False)
+    #df.to_csv(output_csv, index = False)
+    print(df.head())
     print(f"\n Updated {input_csv} with content type and extracted regex info")
 
 if __name__ == "__main__":

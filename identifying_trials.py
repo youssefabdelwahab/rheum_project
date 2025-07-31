@@ -4,6 +4,7 @@ import os
 import numpy as np
 import json
 import pandas as pd
+from collections import Counter
 
 def is_full_width(block, page_width, threshold=0.8):
     """
@@ -204,9 +205,9 @@ def extract_trial_ids(text: str):
     trial_ids = []
 
     for pattern in patterns: 
-        trial_ids += re.findall(pattern, text)
+        trial_ids.extend(re.findall(pattern, text))
 
-    return list(set(trial_ids))
+    return dict(Counter(trial_ids))
 
 def extract_accepted_dates(text : str):
     """
@@ -262,48 +263,79 @@ def extract_from_pdf_or_text(input_source: str):
     trial_ids = extract_trial_ids(text)
     return trial_ids
 
+def match_trial_ids(df_trials : pd.DataFrame, df_extracted : pd.DataFrame) -> pd.DataFrame:
+    """
+    Match extracted Ids with the trial IDs in the original database
+    Function reads two dataframs - the extracted and the original trialID dataframe
+
+    """
+    df_trials['clinical_reg_no'] = df_trials['clinical_reg_no'].apply(
+        lambda x: set(map(str.strip, x.split(';'))) if isinstance(x, str) else set()
+    )
+
+    df_extracted['trial_id'] = df_extracted['trial_id'].apply(
+        lambda x: ast.literal_eval(x) if isinstance(x, str) and x.strip().startswith('{') else (x if isinstance(x, dict) else {})
+    )
+
+    df_extracted['id'] = df_extracted['id'].astype(str)
+    df_trials['recordid.'] = df_trials['recordid.'].astype(str)
+
+    merged_df = pd.merge(df_extracted, df_trials, left_on = "id", right_on = "recordid.", how = "left")
+    
+    def get_matching_trials(row):
+        return {
+            trial_ids: count
+            for trial_ids, count in row['trial_id'].items()
+            if trial_ids in row['clinical_reg_no']
+        }
+    
+    merged_df['matched_trial_ids'] = merged_df.apply(get_matching_trials, axis = 1)
+    return merged_df[['id', 'trial_id', 'clinical_reg_no', 'matched_trial_ids']]
 
 
 if __name__ == "__main__":
     pdf_folder= "downloaded_pdfs"
     pdf_files = [os.path.join(pdf_folder, f) for f in os.listdir(pdf_folder) if f.endswith('.pdf')]
 
-    for pdf_path in pdf_files:
-        trial_ids_pdf = extract_from_pdf_or_text(pdf_path)
-        print("For PDF:", pdf_path)
-        print("Extracted trial numbers:", trial_ids_pdf)
+    #for pdf_path in pdf_files:
+        #trial_ids_pdf = extract_from_pdf_or_text(pdf_path)
+        #print("For PDF:", pdf_path)
+        #print("Extracted trial numbers:", trial_ids_pdf)
 
 
-    df_trials = extract_json_paper_text('database_testing\extracted_paper_info_thread.jsonl')
-    print(df_trials.head())
+    extracted_df = extract_json_paper_text('database_testing\extracted_paper_info_thread.jsonl')
+    print(extracted_df.head(20))
 
 
     columns_to_merge = ['recordid.', 'clinical_reg_no']
-    df = pd.read_excel('database_testing\Living database of RA trials_Latest version to share_withCRSID_2025.xlsx', usecols = columns_to_merge)
+    trial_df = pd.read_excel('database_testing\Living database of RA trials_Latest version to share_withCRSID_2025.xlsx', usecols = columns_to_merge)
 
-    df_trials['id'] = df_trials['id'].astype(str)
-    df['recordid.'] = df['recordid.'].astype(str)
+    result_df = match_trial_ids(trial_df, extracted_df)
+    print(result_df.head(20))
 
-    merged_df = pd.merge(df_trials, df, left_on = "id", right_on = "recordid.", how = "left")
+    # df_trials['id'] = df_trials['id'].astype(str)
+    # df['recordid.'] = df['recordid.'].astype(str)
 
-    print(merged_df.head(20))
+    # merged_df = pd.merge(df_trials, df, left_on = "id", right_on = "recordid.", how = "left")
 
-    def is_clinical_id_in_trial_id(row):
-        clinical_str = row.get('clinical_reg_no')
-        trial_ids = row.get('trial_id')
+    # print(merged_df.head(20))
 
-        if (pd.isna(clinical_str) or clinical_str == ''):
-            clinical_ids = []
-        else:
-            clinical_ids = [x.strip() for x in re.split(r'[;,]', clinical_str)]
+    # def is_clinical_id_in_trial_id(row):
+    #     clinical_str = row.get('clinical_reg_no')
+    #     trial_ids = row.get('trial_id')
 
-        if not clinical_ids and not trial_ids:
-            return True
+    #     if (pd.isna(clinical_str) or clinical_str == ''):
+    #         clinical_ids = []
+    #     else:
+    #         clinical_ids = [x.strip() for x in re.split(r'[;,]', clinical_str)]
+
+    #     if not clinical_ids and not trial_ids:
+    #         return True
         
-        if isinstance(trial_ids, list) and clinical_ids:
-            return all(cid in trial_ids for cid in clinical_ids)   
+    #     if isinstance(trial_ids, list) and clinical_ids:
+    #         return all(cid in trial_ids for cid in clinical_ids)   
 
-    merged_df['clinical_id_match'] = merged_df.apply(is_clinical_id_in_trial_id, axis = 1 )
-    print(merged_df.head(20))
+    # merged_df['clinical_id_match'] = merged_df.apply(is_clinical_id_in_trial_id, axis = 1 )
+    # print(merged_df.head(20))
 
-    merged_df.to_csv("database_testing\match_output.csv", index = False)
+    #merged_df.to_csv("database_testing\match_output.csv", index = False)

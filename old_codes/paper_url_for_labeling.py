@@ -1,6 +1,11 @@
 import json
 import pandas as pd
 
+'''
+This code was written to create a CSV file to be sent to the RA team for labeling
+Need to run again once all the files have been extracted
+'''
+
 json_file = 'database_testing/extracted_paper_info_thread.jsonl'
 
 ids = []

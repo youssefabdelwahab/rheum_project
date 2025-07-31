@@ -312,6 +312,7 @@ if __name__ == "__main__":
 
     result_df = match_trial_ids(trial_df, extracted_df)
     print(result_df.head(20))
+    result_df.to_csv('database_testing/count_trials.csv', index = False)
 
     # df_trials['id'] = df_trials['id'].astype(str)
     # df['recordid.'] = df['recordid.'].astype(str)

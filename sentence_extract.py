@@ -73,6 +73,7 @@ def extract_trial_ids(text: str):
     trial_ids = list(set(re.findall(combined_pattern, text)))
 
     sentences = split_sentences(text)
+    print(sentence)
 
     matched_sentences = [
         sentence.strip()

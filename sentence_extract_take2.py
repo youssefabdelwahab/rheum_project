@@ -4,13 +4,16 @@ import spacy
 import pandas as pd
 
 nlp =  spacy.load("en_core_web_sm")
+nlp.max_length = 2_000_000_000
+
 
 def split_sentences(text):
     """
     This function splits a block of text into individual sentences using a SpaCy NLP model
     """
+
     doc = nlp(text)
-    return[sent.text.strip() for sent in doc.sents]
+    return ([sent.text.strip() for sent in doc.sents])
 
 def extract_accepted_dates(text : str):
     """
@@ -61,6 +64,7 @@ def extract_json_paper_text(jsonl_file_path):
             try:
                 data = json.loads(line)
                 if 'paper_text' in data and 'id' in data:
+                    print(f"Processing line {line_number}")
                     accepted_date = extract_accepted_dates(data['paper_text'])
                     sentences = split_sentences(data['paper_text'])
 

@@ -21,6 +21,6 @@ else:
 
 # Step 3: Upgrade pip and install requirements
 subprocess.run([str(pip_path), "install", "--upgrade", "pip"])
-subprocess.run([str(pip_path), "install", "-r", "requirements.txt"])
+subprocess.run([str(pip_path), "install", "-r", "/work/robust_ai_lab/rheum_project/requirements.txt"])
 
 print("✅ All dependencies installed.")

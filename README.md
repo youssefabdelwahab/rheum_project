@@ -1,13 +1,8 @@
-# Env Set up 
+# **Environment Setup**
 
-## Files included in set up files 
+## **Files Included**
+This project includes two setup options:
 
-bash setup.sh 
+```bash
+bash setup_folder/setup.sh
 
-or 
-
-python setup_env.py
-
-
-
-ENV files are being tracked by gitignore and will not be pushed 

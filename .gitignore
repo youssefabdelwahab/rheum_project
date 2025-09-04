@@ -18,4 +18,11 @@ functions/pdf_resolver.py
 
 archived_papers/
 
-Logs/
+logs/
+
+setup_folder/setup_logs
+
+
+env_paths.sh
+
+flash-attention/

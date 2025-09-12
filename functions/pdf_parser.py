@@ -135,18 +135,42 @@ def extract_pdf(pdf_bytes: bytes) -> Optional[str]:
     """
     Extract text from *pdf_bytes* using pdfplumber; fallback to OCR as needed.
     """
-    extracted: list[str] = []
+    all_text = []
+
     try:
+
         with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
-            for page in pdf.pages:
-                txt = page.extract_text()
-                if txt:
-                    extracted.append(txt)
+            for page_num, page in enumerate(pdf.pages, start = 1):
+                words = page.extract_words()
+                if not words:
+                    continue
+
+                x_coords = [w['x0'] for w in words] + [w['x1'] for w in words]
+                middle_x = (min(x_coords) + max(x_coords))/2
+
+                left_column = [w for w in words if w['x0'] < middle_x]
+                right_column = [w for w in words if w['x0'] >= middle_x]
+
+                left_column = sorted(left_column, key =lambda w: w['top'])
+                right_column = sorted(right_column, key = lambda w: w['top'])
+
+                left_text = "  ".join(w['text'] for w in left_column)
+                right_text = "  ".join(w['text'] for w in right_column)
+
+                all_text.append(left_text)
+                all_text.append(right_text)
+
+                print(f"Page {page_num} processed")
+
+        full_text = "\n\n".join(all_text)
+        
+        print(f"Extraction complete.")
+        return full_text
+
+
     except Exception as exc:  # noqa: BLE001
         print(f"[pdf_parser] pdfplumber failed: {exc}")
 
-    if extracted:
-        return "\n".join(extracted)
 
     print("[pdf_parser] Falling back to OCR …")
     return extract_text_with_ocr(pdf_bytes)

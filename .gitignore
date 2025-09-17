@@ -23,5 +23,43 @@ logs/
 setup_folder/setup_logs
 
 
-env_paths.sh
+env.sh
 
+exl2_models/
+
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+.dist/
+build/
+*.so
+*.o
+*.d
+
+# Virtual envs
+.venv/
+.venv*/
+env*/
+venv*/
+.robust_lab/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Editors
+.vscode/
+.idea/
+*.code-workspace
+
+# Logs / outputs
+logs/
+slurm-*.out
+*.out
+*.err
+
+# tooling installers
+git-lfs-*/ 
+git-lfs.tar.gz

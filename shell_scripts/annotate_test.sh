@@ -14,7 +14,7 @@ module purge
 module load cuda/12.4
 
 
-source /work/robust_ai_lab/rheum_project/.robust_lab/bin/activate
+source /work/robust_ai_lab/shared/venvs/rheum_env311/bin/activate
 
 
 python /work/robust_ai_lab/rheum_project/testing/test_annotate.py

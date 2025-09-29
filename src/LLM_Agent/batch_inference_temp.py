@@ -10,27 +10,12 @@ from datetime import datetime
 
 
 
-import torch
 
-
-# os.environ["CUDA_HOME"] = "/global/software/cuda/12.4.1"
-# os.environ["TORCH_EXTENSIONS_DIR"] = "/work/robust_ai_lab/shared/.cache/torch_ext"  # your shared cache
-# os.environ["TORCH_CUDA_ARCH_LIST"] = "9.0;8.0"
-
-
-
-# max_ctx = 100_000
-# max_chunk_size = 25_000
-# paged = True
-# prompt_format = 'llama'
-# system_prompt = ""
-# ban_strings = None
-# filters = None
-# healing = True
 
 log_dir = Path("logs/annotation_inference")
 log_dir.mkdir(parents=True, exist_ok=True)
-log_file = log_dir / f"app_{datetime.now():%Y-%m-%d}.log"
+log_file = log_dir / f"annotation_{datetime.now():%Y-%m-%d}.log"
+
 
 logging.basicConfig(
     level=logging.INFO,
@@ -46,14 +31,15 @@ LLAMA3_TEMPLATE = (
     "<|start_header_id|>user<|end_header_id|>\n\n{user}<|eot_id|>"
     "<|start_header_id|>assistant<|end_header_id|>\n\n"
 )
+#  "Return JSON with fields: trials: [{name, clinical registration number}].\n\n"
 
 def make_llama3_user_msg(paper_text: str) -> str:
     cleaned = paper_text.replace("\u200b", "").strip()
     return (
         "You are given the full text of a medical research paper.\n\n"
-        "TASK: Extract the main clinical trial name(s) and their registration number(s)\n"
+        "TASK: Extract the paragraph in text that talks about the main clinical trial name(s) and their registration number(s)\n"
         "(e.g., NCT numbers, ISRCTN, EudraCT).\n\n"
-        "Return JSON with fields: trials: [{name, registry_id}].\n\n"
+        "Return JSON with fields: text: [{text}].\n\n"
         "----- PAPER START -----\n"
         f"{cleaned}\n"
         "----- PAPER END -----\n\n"
@@ -126,9 +112,11 @@ def get_stop_conditions(prompt_format, tokenizer):
         raise ValueError(f"Unknown prompt_format: {prompt_format!r}")
 
 
+
 def load_model_on_gpu( 
         model_path:str, 
         max_ctx:int, 
+        max_tokens:int,
         max_chunk_size:int, 
         max_input_len:int, 
         temp:float, 
@@ -142,27 +130,24 @@ def load_model_on_gpu(
     try:
     # Set device before model loading
 
-        assert isinstance(max_ctx, int) and max_ctx % 256 == 0, \
-            f"max_ctx must be multiple of 256; got {max_ctx}"
-        assert isinstance(max_input_len, int), "max_input_len must be int"
-        max_input_len = min(max_input_len, max_ctx)
+        # assert isinstance(max_ctx, int) and max_ctx % 256 == 0, \
+        #     f"max_ctx must be multiple of 256; got {max_ctx}"
+        # assert isinstance(max_input_len, int), "max_input_len must be int"
+        # max_input_len = min(max_input_len, max_ctx)
         assert max_chunk_size > 0 and isinstance(max_chunk_size, int)
-
         # torch.cuda.set_device(gpu_id)
         model_path = model_path
-        # model_path = "/work/robust_ai_lab/exl2_models/llama_nets/3_bpw/Llama-3.1-70B-Instruct-exl2"
         config = ExLlamaV2Config(model_path)
         config.arch_compat_overrides()
-        config.max_input_len = max_input_len
-        effective_chunk = min(max_chunk_size, max_input_len)
-        config.max_attention_size = effective_chunk * effective_chunk
+        config.max_input_len = config.max_input_len
+        config.max_attention_size = max_chunk_size * max_chunk_size
         tokenizer = ExLlamaV2Tokenizer(config)
-
+        
 
 
         model = ExLlamaV2(config)
         cache = ExLlamaV2Cache(model, 
-                            max_seq_len=max_ctx, 
+                            max_seq_len= config.max_input_len, 
                             lazy=True)
         sampler = ExLlamaV2Sampler.Settings()
         sampler.temperature = temp
@@ -171,7 +156,7 @@ def load_model_on_gpu(
         sampler.token_repetition_penalty_max = tok_rep_max_pen
         sampler.token_repetition_penalty_sustain = tok_rep_stn_pen
         sampler.token_repetition_penalty_decay = tok_rep_pen_decay
-
+        
         model.load_autosplit(cache, progress=False)
 
         generator = ExLlamaV2DynamicGenerator(
@@ -192,14 +177,18 @@ def load_model_on_gpu(
         raise e
  
 
+def chunk_text_by_char_limit(text:str, limit:int):
+    for i in range(0, len(text), limit):
+        return text[i:i + limit] 
 
 
 
-
-def batch_call_llm(generator, sampler, tokenizer, system_prompt: str , user_prompts: str, ids: Optional[Sequence[str]] = None) -> str:
+def batch_call_llm(generator, 
+                   sampler, 
+                   tokenizer, 
+                   user_prompts: str, 
+                   ids: Optional[Sequence[str]] = None) -> str:
     prompt_format = 'llama3'
-    # ban_strings = None
-    # filters = None
     if ids is None:
         ids = [str(i) for i in range(len(user_prompts))]
     assert len(ids) == len(user_prompts), "Length of ids must match length of prompts"
@@ -209,18 +198,17 @@ def batch_call_llm(generator, sampler, tokenizer, system_prompt: str , user_prom
 
     for i, (pid, ptxt) in enumerate(zip(ids, user_prompts)): 
         usr_msg = make_llama3_user_msg(ptxt)
-        fprompt = format_prompt(
-            prompt_format, 
-            system_prompt, 
-            usr_msg
-        )
-        input_ids = tokenizer.encode(fprompt, encode_special_tokens = True)
+        # fprompt = format_prompt(
+        #     prompt_format, 
+        #     system_prompt, 
+        #     usr_msg
+        # )
+        input_ids = tokenizer.encode(usr_msg, encode_special_tokens = True)
         job = ExLlamaV2DynamicJob( 
             input_ids=input_ids,
             max_new_tokens = 256, 
             stop_conditions = get_stop_conditions(prompt_format, tokenizer), 
-            # banned_strings = ban_strings, 
-            # filters = filters,
+            add_bos = True,
             gen_settings = sampler,
 
         )
@@ -236,20 +224,6 @@ def batch_call_llm(generator, sampler, tokenizer, system_prompt: str , user_prom
             if r['stage'] == 'streaming' and r["eos"]: 
                 job = r['job']
                 i = jobs_to_idx[job]
-
-                # text = r.get("text") or r.get('full_text')
-
-                # if text is None:
-                #     ids = r.get("full_completion", [])
-                #     if hasattr(ids, "tolist"):
-                #         ids = ids.tolist()
-                #     text = tokenizer.decode(ids, decode_special_tokens=True)[0]
-
-            #     in_prompt = tokenizer.decode(
-            #     job.sequences[0].input_ids.torch(),
-            #     decode_special_tokens=True
-            # )[0]
-                
                 rec = {
                 "doi": ids[i],
                 "full_completion": r.get("full_completion"),
@@ -265,7 +239,3 @@ def batch_call_llm(generator, sampler, tokenizer, system_prompt: str , user_prom
                 logging.info(f"Completed job for id {ids[i]}: {rec}")
     logging.info("All jobs completed")
     return [rec for rec in records if rec is not None]
-
-        # with open(os.path.join(output_path, 'completions.jsonl'), 'w', encoding='utf-8') as f: 
-        #     for rec in finished: 
-        #         f.write(json.dumps(rec, ensure_ascii=False) + '\n')

@@ -40,7 +40,7 @@ build/
 *.d
 .setup_folder/compile.exl.py
 .setup_folder/setup_env.py
-testing/
+/testing/
 
 # Virtual envs
 .venv/

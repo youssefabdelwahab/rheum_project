@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rheum-project"
+version = "0.1.0"
+description = "Rheumatology paper processing and LLM inference utilities"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [{ name = "Youssef Abdelwahab , Archana Senthill" }]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["LLM_Agent*", "functions*", "modules*"]

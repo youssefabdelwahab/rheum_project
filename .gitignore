@@ -38,8 +38,8 @@ build/
 *.so
 *.o
 *.d
-.setup_folder/compile.exl.py
-.setup_folder/setup_env.py
+setup_folder/compile.exl.py
+setup_folder/setup_env.py
 /testing/
 
 # Virtual envs
@@ -72,3 +72,6 @@ git-lfs.tar.gz
 /research_paper_database/unextracted/
 /research_paper_database/paper_journal_info.csv
 
+#shell
+shell_scripts/compile_exl.sh
+shell_scripts/download_hf.sh

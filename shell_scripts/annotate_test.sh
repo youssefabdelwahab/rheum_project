@@ -3,10 +3,13 @@
 #SBATCH --partition=gpu-h100            
 #SBATCH --gpus=1                   # 1x H100
 #SBATCH --cpus-per-task=1         # CPU threads for dataloading/tokenizer
-#SBATCH --mem=64G                 # host RAM (adjust to your IO/tokenizer needs)
+#SBATCH --mem=80G                 # host RAM (adjust to your IO/tokenizer needs)
 #SBATCH --time=00:30:00
-#SBATCH --output=logs/annotation_inference_test/%x-%j.out
-#SBATCH --error=logs/annotation_inference_test/%x-%j.err
+#SBATCH --output=/work/robust_ai_lab/shared/logs/sbatch_logs/annotation_inference/%x-%j.out
+#SBATCH --error=/work/robust_ai_lab/shared/logs/sbatch_logs/annotation_inference/%x-%j.err
+
+set -Eeuo pipefail
+
 
 echo "INFO: Purging modules and loading CUDA..."
 
@@ -15,18 +18,18 @@ module purge
 module load cuda/12.4
 module load gcc/13.3.0
 
+
+echo "exporting env variables ...."
+
+source "/work/robust_ai_lab/shared/env_vars/rheum_project/env_vars.sh"
+
 echo "INFO: Activating Python virtual environment..."
+source "${RHEUM_PROJECT_VENV}/bin/activate"
 
-
-source /work/robust_ai_lab/shared/venvs/rheum_env311/bin/activate
 
 echo "INFO: Exporting environment variables for PyTorch..."
 
-export CUDA_HOME="/global/software/cuda/12.4.1"
-export CPATH=${PYTHON_HEADERS_PATH}${CPATH:+:${CPATH}}
 
-export TORCH_EXTENSIONS_DIR="/work/robust_ai_lab/shared/.cache/torch_ext"
-export TORCH_CUDA_ARCH_LIST="9.0"
 
 echo "-------------------- DEBUGGING INFO --------------------"
 echo "INFO: SLURM_JOB_ID: $SLURM_JOB_ID"
@@ -37,6 +40,6 @@ echo "INFO: CPATH is: $CPATH"
 echo "--------------------- DEBUGGING INFO --------------------"
 
 
-python /work/robust_ai_lab/rheum_project/testing/test_annotate.py
+python /work/robust_ai_lab/rheum_project/scripts/inline_paper_annotation.py
 
 echo "INFO: Job finished."

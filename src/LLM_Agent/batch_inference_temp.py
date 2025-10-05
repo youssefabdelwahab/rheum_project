@@ -1,20 +1,39 @@
 
-import asyncio
 from exllamav2 import ExLlamaV2, ExLlamaV2Tokenizer , ExLlamaV2Config , ExLlamaV2Cache 
 from exllamav2.generator import ExLlamaV2DynamicGenerator , ExLlamaV2Sampler , ExLlamaV2DynamicJob
 from exllamav2.architecture import ExLlamaV2ArchParams
 from typing import Sequence, Optional, List, Dict, Any
-import logging, os
+import logging, os, sys, atexit, signal, json
 from pathlib import Path
 from datetime import datetime
+from dotenv import load_dotenv
 
+env_path = os.getenv("SCRIPT_ENV_FILE")  # export SCRIPT_ENV_FILE=/full/path/to/env_vars.sh
+if not env_path:
+    raise RuntimeError("SCRIPT_ENV_FILE is not set")
 
+env_path = str(Path(env_path).expanduser())
+ok = load_dotenv(dotenv_path=env_path, override=False)
+if not ok:
+    raise FileNotFoundError(f"Could not load env file at {env_path}")
 
+dir_path = os.getenv("LOG_DIR")
 
+log_dir = os.path.join(dir_path, "paper_annotation")
+os.makedirs(log_dir, exist_ok=True)
+log_file = os.path.join(log_dir,  f"annotation_{datetime.now():%Y-%m-%d}.log")
 
-log_dir = Path("logs/annotation_inference")
-log_dir.mkdir(parents=True, exist_ok=True)
-log_file = log_dir / f"annotation_{datetime.now():%Y-%m-%d}.log"
+def cleanup():
+    try:
+        logging.info("Shutting down (atexit cleanup)…")
+    except Exception:
+        pass
+    # Ensure all logging handlers flush/close — prevents lingering .nfs* files
+    try:
+        logging.shutdown()
+    except Exception:
+        pass
+
 
 
 logging.basicConfig(
@@ -25,6 +44,8 @@ logging.basicConfig(
     encoding="utf-8",
 )
 
+atexit.register(cleanup)
+
 LLAMA3_TEMPLATE = (
     "<|begin_of_text|>"
     "<|start_header_id|>system<|end_header_id|>\n\n{system}<|eot_id|>"
@@ -32,48 +53,49 @@ LLAMA3_TEMPLATE = (
     "<|start_header_id|>assistant<|end_header_id|>\n\n"
 )
 #  "Return JSON with fields: trials: [{name, clinical registration number}].\n\n"
+#  "----- PAPER START -----\n"
+#         f"{cleaned}\n"
+#         "----- PAPER END -----\n"
+#         )
 
-def make_llama3_user_msg(paper_text: str) -> str:
-    cleaned = paper_text.replace("\u200b", "").strip()
-    return (
-        "You are given the full text of a medical research paper.\n\n"
-        "TASK: Extract the paragraph in text that talks about the main clinical trial name(s) and their registration number(s)\n"
-        "(e.g., NCT numbers, ISRCTN, EudraCT).\n\n"
-        "Return JSON with fields: text: [{text}].\n\n"
-        "----- PAPER START -----\n"
-        f"{cleaned}\n"
-        "----- PAPER END -----\n\n"
-        "Now answer using only information present in the paper."
+
+def make_llama3_chat( user_text: str) -> str:
+    system_text = (
+        """
+            Task: Extract every clinical trial mentioned in the paper.
+
+            For each trial capture:
+            - "name": the trial name as written, or null if no name appears.
+            - "registration_number": the exact identifier as written (NCT, ISRCTN, EudraCT, CTRI, ChiCTR, ANZCTR, UMIN-CTR, jRCT), or null if none appears.
+
+            Rules:
+            1) If only a registration number is present → name=null.
+            2) If only a name is present → registration_number=null.
+            3) Deduplicate by registration_number; if null, deduplicate by case-insensitive name.
+            4) Use only information present in the paper.
+            5) Dont include any extra text or markdown formatting
+         
+
+            Output ONLY strict JSON:
+            {"trials":[{"name":<string|null>,"registration_number":<string|null>}]}
+            If none, output {"trials":[]}.
+        """
     )
-
-def format_prompt(prompt_format, sp, p):
-    """
-    Returns a chat-formatted prompt string. For Llama-3, we emit the
-    system -> user -> assistant headers that the tokenizer expects.
-    """
-    if prompt_format == "llama3":
-        sys_txt = (sp or "You are a helpful assistant.").strip()
-        usr_txt = (p or "").strip()
-        return LLAMA3_TEMPLATE.format(system=sys_txt, user=usr_txt)
-
-    elif prompt_format == "llama":
-        return f"<s>[INST] <<SYS>>\n{sp}\n<</SYS>>\n\n{p} [/INST]"
-
-    elif prompt_format == "granite":
-        return f"System:\n{sp}\n\nQuestion:\n{p}\n\nAnswer:\n"
-
-    elif prompt_format == "chatml":
-        return (
-            f"<|im_start|>system\n{sp}<|im_end|>\n"
-            f"<|im_start|>user\n{p}<|im_end|>\n"
-            f"<|im_start|>assistant\n"
+    # return system_text
+    user_block = (
+            f"----- PAPER START -----\n{user_text}\----- PAPER END -----"
         )
-
-    elif prompt_format == "gemma":
-        return f"<bos><start_of_turn>user\n{p}<end_of_turn>\n<start_of_turn>model\n"
-
-    else:
-        raise ValueError(f"Unknown prompt_format: {prompt_format!r}")
+        
+    return (
+        "<|begin_of_text|>"
+        "<|start_header_id|>system<|end_header_id|>\n"
+        f"{system_text}\n"
+        "<|eot_id|>"
+        "<|start_header_id|>user<|end_header_id|>\n"
+        f"{user_block}\n"
+        "<|eot_id|>"
+        "<|start_header_id|>assistant<|end_header_id|>\n"
+    )
 
 
 def get_stop_conditions(prompt_format, tokenizer):
@@ -112,6 +134,17 @@ def get_stop_conditions(prompt_format, tokenizer):
         raise ValueError(f"Unknown prompt_format: {prompt_format!r}")
 
 
+def handle_signal(signum, frame):
+    try:
+        logging.warning(f"Received signal {signum}; running cleanup.")
+    except Exception:
+        pass
+    cleanup()
+    # Exit with a code that reflects the signal (optional)
+    sys.exit(128 + signum)
+
+signal.signal(signal.SIGTERM, handle_signal)
+signal.signal(signal.SIGINT,  handle_signal)
 
 def load_model_on_gpu( 
         model_path:str, 
@@ -177,38 +210,67 @@ def load_model_on_gpu(
         raise e
  
 
-def chunk_text_by_char_limit(text:str, limit:int):
-    for i in range(0, len(text), limit):
-        return text[i:i + limit] 
+# def chunk_text_by_char_limit(text:str, limit:int):
+#     for i in range(0, len(text), limit):
+#         return text[i:i + limit] 
+
+def truncate_each_to_limit_wordwise(items, limit: int):
+    
+    if limit < 0:
+        raise ValueError("limit must be >= 0")
+
+    out = []
+    for s in items:
+        # normalize to string, remove zero-width spaces, trim
+        t = "" if s is None else str(s)
+        t = t.replace("\u200b", "").strip()
+
+        if len(t) <= limit:
+            out.append(t)
+            continue
+
+        cut = t[:limit]
+        pos = cut.rfind(" ")
+        # if we found whitespace before the limit, cut there; otherwise hard cut
+        out.append((cut[:pos].rstrip()) if pos != -1 else cut)
+    return out
+
+# def chunk_text_by_char_limit(text: str, limit: int) -> list[str]:
+#     return [text[i:i+limit] for i in range(0, len(text), limit)]
+
+
+
 
 
 
 def batch_call_llm(generator, 
                    sampler, 
                    tokenizer, 
-                   user_prompts: str, 
-                   ids: Optional[Sequence[str]] = None) -> str:
+                   user_prompts: list, 
+                   ids: list) -> str:
     prompt_format = 'llama3'
+
+   
+
     if ids is None:
         ids = [str(i) for i in range(len(user_prompts))]
     assert len(ids) == len(user_prompts), "Length of ids must match length of prompts"
 
     jobs = []
     jobs_to_idx = {}
+    # job_prompt_text: Dict[Any, str] = {}
 
     for i, (pid, ptxt) in enumerate(zip(ids, user_prompts)): 
-        usr_msg = make_llama3_user_msg(ptxt)
-        # fprompt = format_prompt(
-        #     prompt_format, 
-        #     system_prompt, 
-        #     usr_msg
-        # )
+        usr_msg = make_llama3_chat(ptxt)
+       
         input_ids = tokenizer.encode(usr_msg, encode_special_tokens = True)
+       
         job = ExLlamaV2DynamicJob( 
             input_ids=input_ids,
-            max_new_tokens = 256, 
+            max_new_tokens = 128, 
             stop_conditions = get_stop_conditions(prompt_format, tokenizer), 
-            add_bos = True,
+            # stop_conditions = [tokenizer.single_id("}")] or [],
+            add_bos = False,
             gen_settings = sampler,
 
         )
@@ -224,9 +286,11 @@ def batch_call_llm(generator,
             if r['stage'] == 'streaming' and r["eos"]: 
                 job = r['job']
                 i = jobs_to_idx[job]
+            
+
                 rec = {
                 "doi": ids[i],
-                "full_completion": r.get("full_completion"),
+                "full_completion": r.get('full_completion'),
                 "new_tokens": r.get("new_tokens", 0),
                 "prompt_tokens": r.get("prompt_tokens", 0),
                 "cached_tokens": r.get("cached_tokens", 0),
@@ -236,6 +300,103 @@ def batch_call_llm(generator,
                 "eos_reason": r.get("eos_reason", "eos"),
             }
                 records[i] = rec
-                logging.info(f"Completed job for id {ids[i]}: {rec}")
+                logging.info(f"Completed job for id {ids[i]}")
     logging.info("All jobs completed")
     return [rec for rec in records if rec is not None]
+
+
+def first_json_dict(text: str, required_key: str | None = None):
+    """
+    Return the first JSON object embedded in `text`.
+    - Works if `text` is a JSON object, a JSON *string* containing an object, or
+      free text with one/more {...} blocks.
+    - If `required_key` is set, only return an object that contains that key.
+    Returns None if nothing suitable is found.
+    """
+    if not isinstance(text, str):
+        return None
+
+    # 1) Try parsing the whole thing directly
+    try:
+        obj = json.loads(text)
+        # object already
+        if isinstance(obj, dict) and (required_key is None or required_key in obj):
+            return obj
+        # it's a JSON *string* that itself holds JSON -> decode again
+        if isinstance(obj, str):
+            try:
+                obj2 = json.loads(obj)
+                if isinstance(obj2, dict) and (required_key is None or required_key in obj2):
+                    return obj2
+            except json.JSONDecodeError:
+                pass
+    except json.JSONDecodeError:
+        pass
+
+    # 2) Scan for the first {...} and raw-decode from there
+    dec = json.JSONDecoder()
+    i, n = 0, len(text)
+    while i < n:
+        j = text.find("{", i)
+        if j == -1:
+            break
+        try:
+            obj, end = dec.raw_decode(text, j)
+            # if the parsed thing is itself a JSON string, try decoding it too
+            if isinstance(obj, str):
+                try:
+                    obj2 = json.loads(obj)
+                    if isinstance(obj2, dict) and (required_key is None or required_key in obj2):
+                        return obj2
+                except json.JSONDecodeError:
+                    pass
+            if isinstance(obj, dict) and (required_key is None or required_key in obj):
+                return obj
+            i = end
+        except json.JSONDecodeError:
+            i = j + 1
+
+    return None
+
+def inline_llm_call(generator,  tokenizer , sampler, user_prompt, prompt_id): 
+
+    prompt = make_llama3_chat(user_prompt)
+    prompt_encoded = tokenizer.encode(prompt, add_bos=True, encode_special_tokens=True)
+
+    stop_strings = [
+        "```",                 # any fence
+        "\nassistant",         # chat template bleed
+        "\nAssistant",         # capitalized variant
+        "\nThere ", "\nThe ", "\nThis ", "\nNote:", 
+        "\n\nNote",  # typical commentary starts
+        "assistant",           # bare token, just in case
+        "assistant\n\n",
+        " Answer:", " Final", " Therefore",
+        "}\n", "}\r\n",        # most models add a newline after JSON
+    ]
+
+
+    result = generator.generate(
+        prompt = prompt,
+        gen_settings = sampler, 
+        max_new_tokens = 128,
+        stop_conditions = [tokenizer.eos_token_id] ,
+        stop_strings = stop_strings,
+        add_bos = True,
+        return_tokens  = False
+        )
+   
+    if isinstance(result, tuple):
+            out_text, out_tokens = result
+            # Slice off the prompt tokens; decode only the completion
+            new_tokens = out_tokens[len(prompt_encoded):]
+            completion = tokenizer.decode(new_tokens).strip()
+    else:
+    #         # Fallback: result is just text (shouldn't happen with return_tokens=True, but safe)
+        out_text = result
+        #     # Remove the prompt prefix carefully (handles exact string match)
+        completion = out_text[len(prompt):].strip() if out_text.startswith(prompt) else out_text.strip()
+    obj = first_json_dict(completion ,required_key="trials")
+    logging.info("Annotated Paper")
+
+    return {"doi": prompt_id, "trials": obj.get("trials", []) if obj else []}

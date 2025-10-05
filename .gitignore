@@ -38,7 +38,7 @@ build/
 *.so
 *.o
 *.d
-setup_folder/compile.exl.py
+setup_folder/compile_exl.py
 setup_folder/setup_env.py
 /testing/
 

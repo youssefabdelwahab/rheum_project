@@ -3,10 +3,25 @@ import os
 import sys
 import csv
 import asyncio
+from pathlib import Path
+
+
 sys.path.append(os.path.abspath('..'))
 from modules.paper_to_doi import get_article_info_from_title
+
 from dotenv import load_dotenv
 load_dotenv()
+
+env_path = os.getenv("SCRIPT_ENV_FILE")  # export SCRIPT_ENV_FILE=/full/path/to/env_vars.sh
+if not env_path:
+        raise RuntimeError("SCRIPT_ENV_FILE is not set")
+
+env_path = str(Path(env_path).expanduser())
+ok = load_dotenv(dotenv_path=env_path, override=False)
+if not ok:
+    raise FileNotFoundError(f"Could not load env file at {env_path}")
+print("Loaded Env File")
+
 
 def extract_title_and_info(citation: str) -> str:
     # Split the citation by period
@@ -67,10 +82,12 @@ async def csv_writer(file_path , queue):
             
 async def main():
 
-    research_paper_info_file = os.getenv("paper_info_file_path")
-    database_file= os.getenv("paper_database_file_path")
-    
-    with open(database_file, newline='') as paper_database:
+
+    papers_dir = os.getenv("PAPER_DATABASE_PATH")
+    research_paper_database = os.path.join(papers_dir, "Living database of RA trials September 2024_1_2_final_withCRSID_gh.xlsx")
+    paper_info_path = os.path.join(papers_dir, f"paper_journal_info{datetime.now():%Y-%m-%d}.csv")
+
+    with open(research_paper_database, newline='') as paper_database:
         reader = csv.reader(paper_database)
         next(reader)
         row_data = list(reader)
@@ -79,7 +96,7 @@ async def main():
     
     await asyncio.gather(
         pulling_info(row_data, queue),
-        csv_writer(research_paper_info_file, queue)
+        csv_writer(paper_info_path, queue)
     )
 
         

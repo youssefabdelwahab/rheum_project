@@ -15,7 +15,7 @@ set -euo pipefail
 
 
 # --- your env
-source /work/robust_ai_lab/rheum_project/env_paths.sh
+source /work/robust_ai_lab/shared/env_vars/rheum_project/env_vars.sh
 : "${RHEUM_PROJECT_VENV_PATH:?set in env_paths.sh}"
 source "$RHEUM_PROJECT_VENV_PATH/bin/activate"
 

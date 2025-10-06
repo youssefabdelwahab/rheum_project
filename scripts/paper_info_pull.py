@@ -12,7 +12,7 @@ from modules.paper_to_doi import get_article_info_from_title
 from dotenv import load_dotenv
 load_dotenv()
 
-env_path = os.getenv("SCRIPT_ENV_FILE")  # export SCRIPT_ENV_FILE=/full/path/to/env_vars.sh
+env_path = "/work/robust_ai_lab/shared/env_vars/rheum_project/env_vars.sh" # export SCRIPT_ENV_FILE=/full/path/to/env_vars.sh
 if not env_path:
         raise RuntimeError("SCRIPT_ENV_FILE is not set")
 

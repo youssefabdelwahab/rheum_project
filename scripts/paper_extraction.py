@@ -39,14 +39,24 @@ from typing import Optional
 from pathlib import Path
 from functions.extraction_functions import extract_text_with_pdf_resolver
 
+from dotenv import load_dotenv
 
-paper_info_file = os.getenv("paper_info_file_path")
+env_path = os.getenv("SCRIPT_ENV_FILE")  # export SCRIPT_ENV_FILE=/full/path/to/env_vars.sh
+if not env_path:
+    raise RuntimeError("SCRIPT_ENV_FILE is not set")
+
+env_path = str(Path(env_path).expanduser())
+ok = load_dotenv(dotenv_path=env_path, override=False)
+if not ok:
+    raise FileNotFoundError(f"Could not load env file at {env_path}")
+print("Loaded Env File")
+
+papers_dir = os.getenv("PAPER_DATABASE_PATH")
+paper_info_file = os.path.join(papers_dir, "paper_journal_info.csv")
 
 
-repo_root = Path.cwd().parent
-
-extract_save_folder = os.path.join(repo_root, "paper_extracts", "extracted_paper_info")
-unextracted_save_folder = os.path.join(repo_root, "paper_extracts", "unextracted_paper_info")
+extract_save_folder = os.path.join(papers_dir, "extracted")
+unextracted_save_folder = os.path.join(papers_dir, "unextracted")
 
 
 for folder in (extract_save_folder, unextracted_save_folder):

@@ -44,7 +44,7 @@ llama_70B = os.getenv("MODEL_PATH_70B")
 os.makedirs(paper_database, exist_ok=True)
 
 
-from LLM_Agent.batch_inference_temp import  make_llama3_chat , truncate_each_to_limit_wordwise , inline_llm_call
+from LLM_Agent.inference_template import  make_llama3_chat , truncate_each_to_limit_wordwise , inline_llm_call
 
 
 

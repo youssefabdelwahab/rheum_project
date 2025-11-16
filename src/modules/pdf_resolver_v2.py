@@ -23,33 +23,49 @@ nor a landing URL is supplied it raises :class:`MissingIdentifier`.
 
 
 import re 
-import io
 from bs4 import BeautifulSoup
-from typing import Optional , AsyncIterator , List
+from typing import Optional, List
 import urllib.parse
 import requests
 from dotenv import load_dotenv
 from playwright.async_api import async_playwright , Playwright , Browser , TimeoutError as PWTimeoutError, Page
-import asyncio , functools
+import asyncio
 import os
 from typing import Optional
-from urllib.parse import quote , urlparse , urljoin
+from urllib.parse import urljoin
 import httpx
 from httpx import Timeout, AsyncClient
 import random
 from playwright_stealth import stealth_async
 import logging
-import pdfplumber , pytesseract
-from pdf2image import convert_from_bytes
 import random
 from playwright.async_api import BrowserContext 
+from pathlib import Path
+from datetime import datetime
 
 load_dotenv()
 
+env_path = "/work/robust_ai_lab/shared/env_vars/rheum_project/env_vars.sh"  # export SCRIPT_ENV_FILE=/full/path/to/env_vars.sh
+if not env_path:
+    raise RuntimeError("SCRIPT_ENV_FILE is not set")
 
-log_folder = os.path.join(os.path.dirname(__file__), "..", "Logs")
+env_path = str(Path(env_path).expanduser())
+ok = load_dotenv(dotenv_path=env_path, override=False)
+if not ok:
+    raise FileNotFoundError(f"Could not load env file at {env_path}")
+print("Loaded Env File")
+
+repo_root = os.getenv("ROOT_DIR")
+shared_folder = os.path.join(repo_root, "shared")
+pmcid_tool_name = os.getenv("PMCID_TOOL")
+pmcid_email = os.getenv("PMCID_EMAIL")
+print("Loaded Environment Variables Successfully")
+
+
+date_str = datetime.now().strftime("%Y-%m-%d") 
+log_folder = os.path.join(repo_root, shared_folder, "logs/paper_extraction")
 os.makedirs(log_folder, exist_ok=True)
-log_file_path = os.path.join(log_folder, "extraction.log")
+log_file_path = os.path.join(log_folder, f"extraction_{date_str}.log")
 
 logging.basicConfig(
     level=logging.INFO,
@@ -62,35 +78,7 @@ logging.basicConfig(
 logging.getLogger("pdfminer").setLevel(logging.ERROR)
 
 
-def extract_text_with_ocr(pdf_bytes):
-    images = convert_from_bytes(pdf_bytes)
-    full_text = []
-    for i, img in enumerate(images):
-        text = pytesseract.image_to_string(img)
-        if text:
-            full_text.append(text)
-    return "\n".join(full_text).strip() if full_text else None
 
-
-def extract_pdf(pdf_data): 
-     
-    extracted_text = []
-
-    try:
-        with pdfplumber.open(io.BytesIO(pdf_data)) as pdf:
-                for pdf_page in pdf.pages:
-                    page_text = pdf_page.extract_text()
-                    if page_text:
-                        extracted_text.append(page_text)
-    except Exception as e:
-        print(f"pdfplumber failed: {e}")
-
-    if not extracted_text:
-        print("Falling back to OCR...")
-        ocr_text = extract_text_with_ocr(pdf_data)
-        return ocr_text
-
-    return "\n".join(extracted_text).strip() if extracted_text else None
 
 def drop_www(host:str) -> str: 
     return host[4:] if host.startswith("www.") else host
@@ -147,13 +135,17 @@ class PDFResolver:
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 13_4) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15",
     "Mozilla/5.0 (X11; Linux x86_64) Gecko/20100101 Firefox/125.0",
 ]
+        # self.ezproxy_user = os.getenv("uni_username")
+        # self.ezproxy_pass = os.getenv("uni_password")
+        # self.ezproxy_state_path = os.getenv("ezproxy_state_path")
+        self.ezbase = "http://ezproxy.lib.ucalgary.ca/login?url="
         self.selector_timeout = selector_timeout
         self._SPRINGER_HOST = "link.springer.com"
         self._OUP_HOST_RE = re.compile(r"^https?://academic\.oup\.com/")
         self._F1000_HOST_RE = re.compile(r"^https?://(?:f1000research|wellcomeopenresearch|gatesopenresearch)\.org/")
         self._HINDAWI_DOWNLOAD_RE = re.compile(r"^https?://downloads\.hindawi\.com/")
         self._HINDAWI_LANDING_RE = re.compile(r"^https?://(?:www\.)?hindawi\.com/")
-        self._ANCHOR_HINT_RE = re.compile(r"""(?x)                        ]
+        self._ANCHOR_HINT_RE = re.compile(r"""(?x)
         (
             pdf
             | full[\s_-]*text
@@ -182,30 +174,16 @@ class PDFResolver:
         re.I
     )
         self.wiley_token = os.getenv("wiley_api_token")
-
-    class CantDownload(Exception):
-        """
-        Raised when the resolver failed to find a downloadable PDF.
-        Carries the DOI and the final landing URL we ended up on.
-        """
-        def __init__(self, doi:str | None, landing:str):
-            self.doi = doi
-            self.landing = landing
-            super().__init__(f"Could not download PDF for DOI {doi} from {landing}")
     
     class PDFResolverError(Exception): 
         """Base class for PDF resolver errors."""
         pass 
         
     class MissingIdentifier(PDFResolverError):
-        """
-        Raised when the DOI is missing 
-        """
-        def __init__(self): 
-            error_message = "Neither DOI nor landing URL was supplied."
-            super().__init__(f"{error_message}")
+      def __init__(self, message: str = "Neither DOI nor landing URL was supplied."):
+          super().__init__(message)
     
-    class CantDownload(Exception):
+    class CantDownload(PDFResolverError):
         """
         Raised when the resolver failed to find a downloadable PDF.
         Carries the DOI and the final landing URL we ended up on.
@@ -223,6 +201,7 @@ class PDFResolver:
         if self._client:
             await self._client.aclose()
             self._client = None
+
 
     def _client_required(self) -> httpx.AsyncClient:
         if self._client is None or self._client.is_closed:
@@ -276,6 +255,7 @@ class PDFResolver:
         client = self._client_required()
         article_id = doi.split("/")[-1]
         host = urllib.parse.urlparse(landing).hostname
+        #unique f1000 method
         api_url = f"https://api.{host}/article/{article_id}"
         try:
             r = await client.get(api_url)
@@ -283,6 +263,7 @@ class PDFResolver:
             f100_url = r.json()["data"]["pdf_url"]
         except Exception:
             return None 
+        #general method last chance
         try: 
             url_response = await self.try_pdf_url(f100_url)
         except Exception as e: 
@@ -294,6 +275,7 @@ class PDFResolver:
         client = await self._client_required()
         html = (await client.get(landing)).text
         oup_meta = self._extract_meta_pdf(html)
+        #unique oup methods
         try: 
             meta_response = await self.try_pdf_http(oup_meta)
         except Exception as e: 
@@ -305,6 +287,12 @@ class PDFResolver:
         except Exception as e: 
             if anchor_response: 
                 return anchor_response
+        #general method last chance
+        try: 
+            oup_url_response = await self.try_pdf_url(landing)
+        except Exception as e:
+            if oup_url_response: 
+                return oup_url_response
         return None
 
     async def _wiley_pdf(self , landing:str , doi:str) -> Optional[str]:
@@ -328,7 +316,6 @@ class PDFResolver:
             if url_response: 
                 return url_response
         #htmlparse 
-        
         html = (await client.get(landing)).text
         soup = BeautifulSoup(html, "html.parser")
         btn = soup.find("a", class_="pdf-download-link", href=True)
@@ -339,6 +326,12 @@ class PDFResolver:
             except Exception as e: 
                 if btn_response: 
                     return btn_response 
+        # general method last chance
+        try: 
+            wiley_url_response = await self.try_pdf_url(landing)
+        except Exception as e:
+            if wiley_url_response: 
+                return wiley_url_response
         return None
     
     async def _tand_pdf(self , landing:str , doi:str) -> Optional[str]:
@@ -363,14 +356,20 @@ class PDFResolver:
             except Exception as e: 
                 if meta_response: 
                     return meta_response 
-        
+        #anchor tag
         if (anchor := self._extract_anchor_pdf_score(html, landing)):
             resolved_tand_anchor = anchor 
             try: 
                 anchor_response = await self.try_pdf_url(resolved_tand_anchor)
             except Exception as e: 
                 if anchor_response: 
-                    return resolved_tand_anchor 
+                    return anchor_response 
+        # general method last chance
+        try: 
+            tand_url_response = await self.try_pdf_url(landing)
+        except Exception as e:
+            if tand_url_response: 
+                return tand_url_response
         return None
             
         
@@ -386,7 +385,8 @@ class PDFResolver:
         except Exception as e: 
             if url_response: 
                 return r 
-        
+
+        #html parse
         html = (await client.get(landing)).text
         if (meta:= self._extract_meta_pdf(html)):
             resolved_sage_meta = urllib.parse.urljoin(landing, meta)
@@ -395,7 +395,7 @@ class PDFResolver:
             except Exception as e: 
                 if meta_response: 
                     return resolved_sage_meta 
-        
+        #anchor tag
         if (anchor := self._extract_anchor_pdf_score(html, landing)):
             resolved_sage_anchor = anchor
             try: 
@@ -403,7 +403,13 @@ class PDFResolver:
             except Exception as e: 
                 #log 
                 if anchor_response: 
-                    return resolved_sage_anchor 
+                    return anchor_response 
+        # general method last chance
+        try: 
+            sage_url_response = await self.try_pdf_url(landing)
+        except Exception as e:
+            if sage_url_response: 
+                return sage_url_response
         return None
         
         
@@ -430,6 +436,12 @@ class PDFResolver:
             #log 
             if karger_response: 
                 return resolved_karger_link 
+        # general method last chance
+        try: 
+            karger_url_response = await self.try_pdf_url(landing)
+        except Exception as e:
+            if karger_url_response: 
+                return karger_url_response
         return None
     
     
@@ -473,11 +485,15 @@ class PDFResolver:
         raw = await resp.body()
         if not raw:
             return None
-        print('Successfully Extracted PDF from URL:', url)
-        loop = asyncio.get_running_loop()
-        text = await loop.run_in_executor(None, functools.partial(extract_pdf, raw))
-        if text:
-            return text or None
+
+        if not raw.startswith(b"%PDF"):
+            return None
+        print('Successfully Found PDF URL:', url)
+        return raw
+        # loop = asyncio.get_running_loop()
+        # text = await loop.run_in_executor(None, functools.partial(extract_pdf, raw))
+        # if text:
+        #     return text or None
     
     
     async def try_pdf_http(self,url:str):
@@ -502,11 +518,13 @@ class PDFResolver:
         raw = resp.content
         if not raw:
             return None
+
+        if not raw.startswith(b"%PDF"):
+            return None
         print('Successfully downloaded PDF from URL:', url)
-        loop = asyncio.get_event_loop()
-        text = await loop.run_in_executor(None, functools.partial(extract_pdf, raw))
-        if text: 
-            return text or None
+        return raw
+
+       
     
     def _extract_anchor_pdf_score(self, html: str, base_url: str) -> Optional[str]:
         soup = BeautifulSoup(html, "html.parser")
@@ -557,8 +575,8 @@ class PDFResolver:
                 return None
 
             resolved = urljoin(page.url, href)
-            text     = await self.try_pdf_url(resolved)
-            return text                 # None when not a PDF / could not extract
+            selector_bytes = await self.try_pdf_url(resolved)
+            return selector_bytes                 # None when not a PDF / could not extract
         except PWTimeoutError:
             return None
         
@@ -571,9 +589,9 @@ class PDFResolver:
             return None                     # no PDF button found
         try:
             resolved_href = urljoin(page.url, href_btn)
-            href_response = await self.try_pdf_url(resolved_href)
-            if href_response: 
-                return href_response
+            href_bytes = await self.try_pdf_url(resolved_href)
+            if href_bytes: 
+                return href_bytes
         except TimeoutError:
             return None
     
@@ -603,9 +621,9 @@ class PDFResolver:
                 
                 anchor_link = urljoin(page.url, href)
                 try:
-                    anchor_response = await self.try_pdf_url(anchor_link)
-                    if anchor_response: 
-                        return anchor_response
+                    anchor_bytes = await self.try_pdf_url(anchor_link)
+                    if anchor_bytes: 
+                        return anchor_bytes
                 except Exception as e:
                     continue 
                         #log
@@ -616,13 +634,14 @@ class PDFResolver:
         if not  current_url.lower().endswith(".pdf") or "pdf" in current_url.lower():
             return None
         try:
-            redirect_response = await self.try_pdf_url(current_url)
-            if redirect_response: 
-                return redirect_response
+            redirect_bytes = await self.try_pdf_url(current_url)
+            if redirect_bytes: 
+                return redirect_bytes
         except Exception as e: 
                 #log 
             return None
-            
+    
+   
     async def try_browser_strategies(self, domain:str,page: Page) -> str | None:
         """
         Run the **four** browser strategies in order.
@@ -637,29 +656,29 @@ class PDFResolver:
         ]
         for fn in strategies:
             try:
-                text = await fn(domain, page) if fn is self.find_via_selector else await fn(page)
+                pdf_bytes_brows_str = await fn(domain, page) if fn is self.find_via_selector else await fn(page)
             except Exception:
                 continue
-            if text:                # one of the strategies succeeded
-                return text  
+            if pdf_bytes_brows_str:                # one of the strategies succeeded
+                return pdf_bytes_brows_str  
         # All four strategies failed
         print("All browser methods failed to extract PDF.")
         return None
 
     async def fetch_pdf_with_browser(self, landing) -> Optional[str]:
     
-        client = self._client_required()
-        # if doi:
-        #     landing_url = str((await client.get(f"https://doi.org/{doi}")).url)
-        # else:
-        #     landing_url = str(landing)
-        landing_url = landing
-        domain = drop_www(urlparse(landing_url).netloc.lower())
+        # client = self._client_required()
+        # # if doi:
+        # #     landing_url = str((await client.get(f"https://doi.org/{doi}")).url)
+        # # else:
+        # #     landing_url = str(landing)
+        # landing_url = landing
+        # domain = drop_www(urlparse(landing_url).netloc.lower())
 
-        username = os.getenv("uni_username")
-        password = os.getenv("uni_password")
-        if not username or not password:
-            raise RuntimeError("Missing EZProxy credentials.")
+        # username = os.getenv("uni_username")
+        # password = os.getenv("uni_password")
+        # if not username or not password:
+        #     raise RuntimeError("Missing EZProxy credentials.")
 
         context = await self.context_required()
         async with await  context.new_page() as page:
@@ -668,11 +687,11 @@ class PDFResolver:
             except ImportError:
                 logging.warning("playwright_stealth not installed; continuing without stealth")
 
-            await page.goto(landing_url, wait_until='networkidle')
+            await page.goto(landing, wait_until='networkidle')
                 
-            text = await self.try_browser_strategies(domain,page)
-            if text:
-                return text
+            pdf_bytes_brows = await self.try_browser_strategies(domain,page)
+            if pdf_bytes_brows:
+                return pdf_bytes_brows, landing
             print("All browser methods failed to extract PDF.")
 
             return None
@@ -703,96 +722,361 @@ class PDFResolver:
                 best = url
         return best 
 
-    
-    
-    async def get_pdf(self, doi, paper_id ) -> str:
-        print(f"Attempting to resolve pdf of paper_id: {paper_id}")
+
+    async def doi_to_pmcid(
+        self,
+        id: str,
+        tool: str = str(pmcid_tool_name),
+        email: str = str(pmcid_email),
+    ) -> Optional[str]:
+        """
+        Convert a DOI or PMID to a PMCID using the NCBI ID Converter API.
+
+        Parameters
+        ----------
+        id : str
+            The DOI (starts with "10.") or PMID.
+        tool : str
+            Name of your application/tool (required by NCBI API).
+        email : str
+            Email address of the maintainer (required by NCBI API).
+
+        Returns
+        -------
+        Optional[str]
+            PMCID if found, else None.
+        """
+        id = id.strip()
+        idtype = "doi" if id.startswith("10.") else "pmid"
+
+        base_url = "https://www.ncbi.nlm.nih.gov/pmc/utils/idconv/v1.0/"
+        params = {
+            "tool": tool,
+            "email": email,
+            "ids": id,
+            "idtype": idtype,
+            "format": "json",
+        }
+
         client = self._client_required()
-        if doi: 
-            landing = str((await client.get(f"https://doi.org/{doi}")).url)
+
+        try:
+            resp = await client.get(base_url, params=params)
+            resp.raise_for_status()
+            data = resp.json()
+        except httpx.HTTPError as e:
+            print(f"[PUBMED] HTTP error for {idtype}={id!r}: {e}")
+            return None
+
+        if data.get("status") != "ok" or not data.get("records"):
+            print(f"[PUBMED] No records found for {idtype}={id!r}")
+            return None
+
+        record = data["records"][0]
+        pmcid = record.get("pmcid")
+        if not pmcid:
+            print(f"[PUBMED] Record found but no PMCID for {idtype}={id!r}")
+            return None
+
+        print(f"[PUBMED] Found PMCID: {pmcid} for {idtype}={id!r}")
+        return pmcid
+    
+    async def get_doc_from_pmc(
+        self,
+        input_id: str,
+        context: BrowserContext | None = None,
+    ) -> Optional[bytes]:
+        """
+        Given a DOI or PMCID, try to download the PDF from PubMed Central
+        and return the raw PDF bytes.
+        """
+        base_url = "https://pmc.ncbi.nlm.nih.gov/articles"
+        doi_pattern = r"^10\.\d{4,9}\/[^\s]+$"
+
+        # 1) Convert DOI → PMCID if needed
+        if re.match(doi_pattern, input_id):
+            pmcid = await self.doi_to_pmcid(input_id)
+            if pmcid is None:
+                print(f"[PMC] Failed to resolve DOI to PMCID for {input_id}")
+                return None
         else:
-            raise self.MissingIdentifier(error_message="No DOI or landing URL provided.")
-        print(f"Attempting to resolve pdf from : {landing}")
+            pmcid = input_id
 
+        # 2) Ensure we have a context + page
+        if context is None:
+            context = await self.context_required()
+
+        page = await context.new_page()
+
+        try:
+            article_url = f"{base_url}/{pmcid}"
+            print(f"[PMC] Visiting {article_url}")
+            await page.goto(article_url, wait_until="networkidle")
+            html_content = await page.content()
+
+            # 3) Find a PDF link
+            pattern = r'pdf/[^"\s]+'
+            matches = re.findall(pattern, html_content)
+            if not matches:
+                print(f"[PMC] No PDF link found on PMC page for {input_id}")
+                return None
+
+            pdf_path = matches[0]
+            pdf_url = f"{base_url}/{pmcid}/{pdf_path}"
+            print(f"[PMC] Fetching PDF from {pdf_url}")
+
+            # 4) Download PDF via Playwright's request API
+            resp = await context.request.get(pdf_url, timeout=self.selector_timeout)
+            if resp.status != 200:
+                print(f"[PMC] Failed to GET PDF {pdf_url}: HTTP {resp.status}")
+                return None
+
+            raw = await resp.body()
+            if not raw or not raw.startswith(b"%PDF"):
+                print(f"[PMC] Invalid PDF content from {pdf_url}")
+                return None
+
+            print(f"[PMC] Successfully downloaded PDF for {input_id}")
+            return raw
+
+        except Exception as e:
+            print(f"[PMC] Exception while downloading PDF for {input_id}: {e}")
+            return None
+        finally:
+            await page.close()
+
+
+    
+    async def get_pdf(
+        self,
+        doi: Optional[str],
+        paper_id: str,
+        cross_ref_paper_link: Optional[str],
+    ) -> tuple[bytes, str]:
+        """
+        Main entrypoint: try multiple strategies to obtain PDF bytes.
+
+        Returns
+        -------
+        (pdf_bytes, landing_url)
+
+        Raises
+        ------
+        MissingIdentifier
+            If no DOI is provided and there is no usable link.
+        CantDownload
+            If all strategies fail to obtain a PDF.
+        """
+        print(f"Attempting to resolve pdf of paper_id: {paper_id!r}")
+        client = self._client_required()
+        browser_context = await self.context_required()
+
+        # 1) If we have a direct CrossRef paper link, try that first
+        if cross_ref_paper_link:
+            print("[CROSS REF LINK] Trying cross_ref_paper_link first.")
+            try:
+                cross_ref_bytes = await self.try_pdf_url(
+                    cross_ref_paper_link, context=browser_context
+                )
+            except Exception as e:
+                cross_ref_bytes = None
+                print(f"[CROSS REF LINK] Error: {e}")
+            if cross_ref_bytes:
+                print("[CROSS REF LINK] Extracted PDF.")
+                return cross_ref_bytes, cross_ref_paper_link
+
+        # 2) Require a DOI from here on
+        if not doi:
+            raise self.MissingIdentifier()
+
+        # 3) Try PubMed Central via DOI → PMCID
+        print("[PUBMED] Trying to fetch from PMC if available...")
+        try:
+            pub_med_bytes = await self.get_doc_from_pmc(doi, context=browser_context)
+        except Exception as e:
+            pub_med_bytes = None
+            print(f"[PUBMED] Error while trying PMC: {e}")
+        if pub_med_bytes:
+            # Optional: resolve PMCID again just to get a nice landing URL
+            pmcid = await self.doi_to_pmcid(doi)
+            landing_pmc = (
+                f"https://pmc.ncbi.nlm.nih.gov/articles/{pmcid}"
+                if pmcid
+                else "https://pmc.ncbi.nlm.nih.gov/"
+            )
+            print("[PUBMED] Extracted PDF via PMC.")
+            return pub_med_bytes, landing_pmc
+
+        # 4) Resolve DOI via EZProxy to a landing URL
+        print("[DOI] Will attempt to resolve pdf via DOI.")
+        target_url = f"https://doi.org/{doi}"
+        # full_url = f"{self.ezbase}{quote(target_url, safe='')}"
+
+        try:
+            landing_resp = await client.get(target_url, timeout=15)
+            landing_resp.raise_for_status()
+        except Exception as e:
+            print(f"[DOI] Error fetching landing page for {doi!r}: {e}")
+            raise self.CantDownload(doi, target_url)
+
+        landing = str(landing_resp.url)  # final publisher landing URL
+        print(f"[DOI] Landing URL: {landing}")
+        # domain = drop_www(urlparse(landing).netloc.lower())
+
+        # 5) Springer
         if self._SPRINGER_HOST in landing:
-            print("Trying with Springer landing page.")
+            print("[SPRINGER] Trying with Springer landing page.")
             for springer_url in self._springer_candidates(landing, doi):
-                try: 
-                    springer_url = await self.try_pdf_url(springer_url)
+                try:
+                    springer_bytes = await self.try_pdf_url(
+                        springer_url, context=browser_context
+                    )
                 except Exception as e:
-                    continue
-                if springer_url:
-                    print("Extracted PDF from Springer landing page.")
+                    springer_bytes = None
+                    print(f"[SPRINGER] Error for {springer_url}: {e}")
+                if springer_bytes:
+                    print("[SPRINGER] Extracted PDF from Springer landing page.")
+                    return springer_bytes, landing
 
-                    return springer_url
-
+        # 6) Hindawi
         if self._HINDAWI_DOWNLOAD_RE.match(landing) or self._HINDAWI_LANDING_RE.match(landing):
-            print("Trying with Hindawi landing page.")
+            print("[HINDAWI] Trying with Hindawi landing page.")
             for hindawi_paper in (landing, f"https://doi.org/{doi}"):
                 try:
-                    hindawi_url = await self.try_pdf_url(hindawi_paper)
+                    hindawi_bytes = await self.try_pdf_url(
+                        hindawi_paper, context=browser_context
+                    )
                 except Exception as e:
-                    continue
-                if hindawi_url:
-                    print("Extracting PDF from Hindawi landing page.")
-                    return hindawi_url
+                    hindawi_bytes = None
+                    print(f"[HINDAWI] Error for {hindawi_paper}: {e}")
+                if hindawi_bytes:
+                    print("[HINDAWI JOURNAL] Found! Extracting PDF.")
+                    return hindawi_bytes, landing
 
+        # 7) F1000
         if self._F1000_HOST_RE.match(landing):
-            print("Trying with F1000 landing page.")
-            f100_pdf = await self._f1000_pdf(landing, doi)
-            if f100_pdf:
-                print("Extracted PDF from F1000 landing page.")
-                return f100_pdf
+            print("[F1000] Trying with F1000 landing page.")
+            try:
+                f100_pdf_bytes = await self._f1000_pdf(landing, doi)
+            except Exception as e:
+                f100_pdf_bytes = None
+                print(f"[F1000] Error: {e}")
+            if f100_pdf_bytes:
+                print("[F1000] Extracted PDF.")
+                return f100_pdf_bytes, landing
 
+        # 8) OUP
         if self._OUP_HOST_RE.match(landing):
-            print("Trying with OUP landing page.")
-            oup_pdf = await self._oup_pdf(landing)
-            if oup_pdf:
-                print("Extracted PDF from OUP landing page.")
-                return oup_pdf
-        
-        
+            print("[OUP] Trying with OUP landing page.")
+            try:
+                oup_pdf_bytes = await self._oup_pdf(landing)
+            except Exception as e:
+                oup_pdf_bytes = None
+                print(f"[OUP] Error: {e}")
+            if oup_pdf_bytes:
+                print("[OUP] Extracted PDF.")
+                return oup_pdf_bytes, landing
+
+        # 9) Taylor & Francis (tandfonline)
+        if "tandfonline.com" in landing:
+            print("[TANDFONLINE] Trying with Tandfonline landing page.")
+            try:
+                tand_pdf_bytes = await self._tand_pdf(landing, doi)
+            except Exception as e:
+                tand_pdf_bytes = None
+                print(f"[TANDFONLINE] Error: {e}")
+            if tand_pdf_bytes:
+                print("[TANDFONLINE] Extracted PDF.")
+                return tand_pdf_bytes, landing
+
+        # 10) SAGE
+        if "sagepub.com" in landing:
+            print("[SAGEPUB] Trying with Sagepub landing page.")
+            try:
+                sage_pdf_bytes = await self._sage_pdf(landing, doi)
+            except Exception as e:
+                sage_pdf_bytes = None
+                print(f"[SAGEPUB] Error: {e}")
+            if sage_pdf_bytes:
+                print("[SAGEPUB] Extracted PDF.")
+                return sage_pdf_bytes, landing
+
+        # 11) Wiley
         if "onlinelibrary.wiley.com" in landing:
-            print("Trying with Wiley landing page.")
-            wiley_pdf = await self._wiley_pdf(landing, doi)
-            if wiley_pdf:
-                print("Extracted PDF from Wiley landing page.")
-                return wiley_pdf
-            
-        html = (await client.get(landing)).text
-        anchor = self._extract_anchor_pdf_score(html, landing)
-        if anchor:
-            print("Trying with anchor hint matching.")
-
-            try: 
-                anchor_pdf = await self.try_pdf_url(anchor)
+            print("[WILEY] Trying with Wiley landing page.")
+            try:
+                wiley_pdf_bytes = await self._wiley_pdf(landing, doi)
             except Exception as e:
-                anchor_pdf = None
-            if anchor_pdf:
-                print("Extracted PDF via anchor hint.")
-                return anchor_pdf
-        
-        if doi and (cross := self._crossref_fallback(doi)):
-            print("Trying with crossref fallback.")
+                wiley_pdf_bytes = None
+                print(f"[WILEY] Error: {e}")
+            if wiley_pdf_bytes:
+                print("[WILEY] Extracted PDF.")
+                return wiley_pdf_bytes, landing
 
-            try: 
-                cross_ref_pdf = await self.try_pdf_url(cross)
+        # 12) Karger
+        if "karger.com" in landing:
+            print("[KARGER] Trying with Karger landing page.")
+            try:
+                karger_pdf_bytes = await self._karger_pdf(landing, doi)
             except Exception as e:
-                cross_ref_pdf = None
-            if cross_ref_pdf:
-                print("Extracted PDF via CrossRef fallback.")
-                return cross_ref_pdf
-                
-        print("Trying with browser automation to extract PDF.")
+                karger_pdf_bytes = None
+                print(f"[KARGER] Error: {e}")
+            if karger_pdf_bytes:
+                print("[KARGER] Extracted PDF.")
+                return karger_pdf_bytes, landing
+
+        # 13) Generic anchor/meta scoring
+        print("[ANCHOR] Trying generic anchor/meta scoring on landing HTML...")
         try:
-            browser_pdf = await self.fetch_pdf_with_browser(landing)
+            html = (await client.get(landing)).text
         except Exception as e:
-            browser_pdf = None
-        if browser_pdf:
-            print("Extrated PDF via browser automation.")
-            return browser_pdf
-        
+            html = ""
+            print(f"[ANCHOR] Error fetching landing HTML: {e}")
 
-        raise self.CantDownload(doi , landing)
+        anchor_url = self._extract_anchor_pdf_score(html, landing) if html else None
 
+        if anchor_url:
+            print(f"[ANCHOR] Candidate PDF link: {anchor_url}")
+            try:
+                anchor_bytes = await self.try_pdf_url(
+                    anchor_url, context=browser_context
+                )
+            except Exception as e:
+                anchor_bytes = None
+                print(f"[ANCHOR] Error for {anchor_url}: {e}")
+            if anchor_bytes:
+                print("[ANCHOR] Extracted PDF.")
+                return anchor_bytes, landing
+
+        # 14) CrossRef API fallback
+        if doi:
+            print("[CROSSREF API] Trying CrossRef API fallback...")
+            crossref_candidate = self._crossref_fallback(doi)
+            if crossref_candidate:
+                print(f"[CROSSREF API] Candidate: {crossref_candidate}")
+                try:
+                    crossref_bytes = await self.try_pdf_url(
+                        crossref_candidate, context=browser_context
+                    )
+                except Exception as e:
+                    crossref_bytes = None
+                    print(f"[CROSSREF API] Error: {e}")
+                if crossref_bytes:
+                    print("[CROSSREF API] Extracted PDF.")
+                    return crossref_bytes, landing
+
+        # 15) Browser automation fallback
+        print("[BROWSER] Trying browser automation fallback...")
+        try:
+            browser_pdf_bytes = await self.fetch_pdf_with_browser(landing)
+        except Exception as e:
+            browser_pdf_bytes = None
+            print(f"[BROWSER] Error in fetch_pdf_with_browser: {e}")
+        if browser_pdf_bytes:
+            print("[BROWSER] Extracted PDF via browser automation.")
+            return browser_pdf_bytes, landing
+
+        # 16) Nothing worked
+        print("[FATAL] All strategies failed to extract PDF.")
+        raise self.CantDownload(doi, landing)
     

@@ -1,31 +1,3 @@
-research_paper_database/Living database of RA trials September 2024_1_2_final_withCRSID_gh.csv
-research_paper_database/Living database of RA trials September 2024_1_2_final_withCRSID_gh.xlsx
-
-
-.env
-
-
-
-robust_py311/
-
-paper_extracts/
-
-Document_Extraction/rp_pull_test.ipynb
-
-functions/pdf_parser.py 
-
-functions/pdf_resolver.py
-
-archived_papers/
-
-logs/
-
-setup_folder/setup_logs
-
-
-env.sh
-
-exl2_models/
 
 
 # Python
@@ -67,10 +39,7 @@ git-lfs-*/
 git-lfs.tar.gz
 
 
-#papers 
-/research_paper_database/extracted/
-/research_paper_database/unextracted/
-/research_paper_database/paper_journal_info.csv
+
 
 #shell
 shell_scripts/compile_exl.sh

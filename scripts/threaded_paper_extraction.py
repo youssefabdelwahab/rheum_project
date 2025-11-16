@@ -31,9 +31,8 @@ from typing import Optional
 from pathlib import Path
 from functions.extraction_functions import extract_text_with_pdf_resolver
 from dotenv import load_dotenv
-load_dotenv()
+from datetime import datetime
 
-from dotenv import load_dotenv
 
 env_path = "/work/robust_ai_lab/shared/env_vars/rheum_project/env_vars.sh"  # export SCRIPT_ENV_FILE=/full/path/to/env_vars.sh
 if not env_path:
@@ -45,20 +44,26 @@ if not ok:
     raise FileNotFoundError(f"Could not load env file at {env_path}")
 print("Loaded Env File")
 
-papers_dir = os.getenv("PAPER_DATABASE_PATH")
-paper_info_file = os.path.join(papers_dir, "paper_journal_info.csv")
+repo_root = os.getenv("ROOT_DIR")
+paper_info_file = os.getenv("PAPER_INFO_FILE")
+shared_folder = os.path.join(repo_root, "shared")
+print("Loaded Environment Variables Successfully")
+date_str = datetime.now().strftime("%Y-%m-%d") 
 
 
-extract_save_folder = os.path.join(papers_dir, "extracted")
-unextracted_save_folder = os.path.join(papers_dir, "unextracted")
+
+extract_save_folder = os.path.join(shared_folder, "research_paper_database/pdf_paper_extracts", f"extracted_papers_{date_str}")
+unextracted_save_folder = os.path.join(shared_folder, "research_paper_database/pdf_paper_extracts" f"unextracted_papers_{date_str}")
+pdf_file_dir = os.path.join(extract_save_folder, "pdfs")
 
 
 for folder in (extract_save_folder, unextracted_save_folder):
     os.makedirs(folder, exist_ok=True)
+
+print("Set Up Folders for Storage Successfully")
     
-    
-extract_file_path = os.path.join(extract_save_folder, "extracted_paper_info_thread.jsonl")
-unextracted_file_path = os.path.join(unextracted_save_folder, "unextracted_paper_info_thread.jsonl")
+extract_meta_path = os.path.join(extract_save_folder, "extracted_paper_meta_thread.jsonl")
+unextracted_meta_path = os.path.join(unextracted_save_folder, "unextracted_paper_meta_thread.jsonl")
 
 
 async def load_papers_from_csv(task_queue: asyncio.Queue):
@@ -87,6 +92,9 @@ async def load_papers_from_csv(task_queue: asyncio.Queue):
         # Skip the header row
         header = await reader.__anext__()
 
+        seen_ids = set()
+
+
         # Read each data row and add it to the task queue
         async for row in reader:
             paper_id = row[0]
@@ -94,14 +102,20 @@ async def load_papers_from_csv(task_queue: asyncio.Queue):
             paper_doi = row[2]
             paper_link = str(row[3])  # ensure it's a string
 
+            if paper_id in seen_ids:
+            # optional: log it
+                print(f"[loader] skipping duplicate paper_id {paper_id}")
+                continue
+            seen_ids.add(paper_id)
+
             # Create a task dictionary to be processed later
             task_queue.put_nowait({
                 "doi": paper_doi,
                 "title": paper_title,
                 "crossref_paper_link": paper_link,
-                "id": paper_id,
+                "paper_id": paper_id,
                 "pdf_url": "",           # will be filled by resolver
-                "paper_text": "",        # will be filled after extraction
+                "pdf_bytes": "",        # will be filled after extraction
                 "resolver_error": ""     # will be filled if an error occurs
             })
 
@@ -140,69 +154,75 @@ async def extracting_pdf(task_queue: asyncio.Queue,
 
     while True:
         paper_dict = await task_queue.get()
-        if paper_dict is None:
-            print(f"Worker {worker_id} finished processing.")
-            break  # Shut down the worker gracefully
 
-        paper_doi = paper_dict.get("doi")
-        paper_id = paper_dict.get("id")
-        pdf_text = None
-        pdf_url = None
 
         try:
-            # Attempt to resolve PDF and extract text
-            pdf_text = await extract_text_with_pdf_resolver(
-                doi=paper_doi,
-                paper_id=paper_id,
-                selector_timeout=40000
-            )
+            if paper_dict is None:
+                print(f"Worker {worker_id} finished processing.")
+                break
 
-            # Handle case where resolver returned nothing
-            if pdf_text is None:
-                paper_dict['resolver_error'] = "Unknown Resolver Error"
+            paper_doi = paper_dict.get("doi")
+            paper_id = paper_dict.get("paper_id")
+            paper_url = paper_dict.get("crossref_paper_link")
+
+            try:
+                result = await extract_text_with_pdf_resolver(
+                    doi=paper_doi,
+                    paper_id=paper_id,
+                    cross_ref_paper_link=paper_url,
+                    selector_timeout=40000,
+                )
+
+                # 1) Nothing came back
+                if result is None:
+                    paper_dict["resolver_error"] = "Unknown Resolver Error"
+                    await unextracted_queue.put(paper_dict)
+                    continue
+
+                # 2) Error case: dict with structured error info
+                if isinstance(result, dict):
+                    if "Missing Doi Error" in result:
+                        paper_dict["resolver_error"] = result.get("Missing Doi Error")
+                    elif "url" in result:
+                        pdf_url = result.get("url")
+                        paper_dict["resolver_error"] = "Failed to Download PDF"
+                        paper_dict["pdf_url"] = pdf_url
+                    else:
+                        paper_dict["resolver_error"] = "Unknown Resolver Error"
+
+                    await unextracted_queue.put(paper_dict)
+                    continue
+
+                # 3) Success case: (pdf_bytes, pdf_url)
+                pdf_bytes, pdf_url = result
+
+                if pdf_bytes is None:
+                    paper_dict["resolver_error"] = "No PDF Bytes Extracted"
+                    await unextracted_queue.put(paper_dict)
+                    continue
+
+                print(f"Extracted paper {paper_doi}")
+                paper_dict["pdf_bytes"] = pdf_bytes
+                paper_dict["pdf_url"] = pdf_url
+                await extracted_queue.put(paper_dict)
+
+            except asyncio.TimeoutError:
+                print(f"Async timeout fetching published PDF for {paper_id}")
+                paper_dict["resolver_error"] = "Async Timeout Error"
                 await unextracted_queue.put(paper_dict)
                 continue
 
-            # Handle structured error response (dictionary)
-            if isinstance(pdf_text, dict):
-                # Specific case: DOI was not found
-                if "Missing Doi Error" in pdf_text:
-                    paper_dict['resolver_error'] = pdf_text.get("Missing Doi Error")
-                    paper_dict['pdf_url'] = pdf_url
-                    paper_dict['paper_text'] = pdf_text
-                    await unextracted_queue.put(paper_dict)
-                    continue
+            except Exception as e:
+                print(f"Error extracting published paper: {paper_id}: {e}")
+                paper_dict["resolver_error"] = str(e)
+                await unextracted_queue.put(paper_dict)
+                continue
 
-                # Specific case: resolver couldn't download from the landing page
-                elif "url" in pdf_text:
-                    pdf_url = pdf_text.get("url")
-                    paper_dict['resolver_error'] = "Failed to Download PDF"
-                    paper_dict['url'] = pdf_url
-                    await unextracted_queue.put(paper_dict)
-                    continue
+        finally:
+            # This runs no matter what: success, continue, or exception
+            task_queue.task_done()
 
-        except asyncio.TimeoutError:
-            # Handle network timeout
-            print(f"Async timeout fetching published PDF for {paper_id}")
-            paper_dict['resolver_error'] = "Async Timeout Error"
-            await unextracted_queue.put(paper_dict)
-            continue
-
-        except Exception as e:
-            # Handle unexpected exceptions
-            print(f"Error extracting published paper: {paper_id}")
-            paper_dict['resolver_error'] = str(e)
-            await unextracted_queue.put(paper_dict)
-            continue
-
-        # If successful, store the extracted text
-        if pdf_text:
-            print(f"Extracted paper {paper_doi}")
-            paper_dict["paper_text"] = pdf_text
-            await extracted_queue.put(paper_dict)
-
-
-async def writer(path: Path, queue: asyncio.Queue) -> None:
+async def writer(queue: asyncio.Queue, meta_path: Path, pdf_dir_path: Path | None = None) -> None:
     """
     Asynchronous consumer that writes items from a queue to a file
     in JSON Lines (.jsonl) format.
@@ -228,17 +248,45 @@ async def writer(path: Path, queue: asyncio.Queue) -> None:
     - Only one writer should consume a given queue to avoid concurrent file writes.
     - This pattern ensures safe and efficient file output in an asyncio pipeline.
     """
+    meta_path_obj = Path(meta_path)
 
-    async with aiofiles.open(path, 'a') as f:
-        while True:
-            item = await queue.get()
+    # Ensure pdf_dir_path is a Path if provided
+    if pdf_dir_path is not None:
+        pdf_dir_path = Path(pdf_dir_path)
+        pdf_dir_path.mkdir(parents=True, exist_ok=True)
 
-            # Special signal to shut down the writer
-            if item is None:
-                break
 
-            # Serialize to JSON and write a single line
-            await f.write(json.dumps(item) + "\n")
+    while True:
+        paper = await queue.get()
+        try:
+            if paper is None:
+                print(f"Writer for {meta_path} shutting down.")
+                return
+
+             # If we have PDF bytes and a directory to save them
+            if pdf_dir_path is not None and paper.get("pdf_bytes"):
+
+
+                paper_id = paper["paper_id"]
+                pdf_bytes = paper["pdf_bytes"]
+
+                pdf_path = pdf_dir_path / f"{paper_id}.pdf"
+                pdf_path.write_bytes(pdf_bytes)
+
+                paper["pdf_path"] = str(pdf_path)
+                paper.pop("pdf_bytes", None)  # Remove raw bytes before writing metadata
+                print(f"Downloaded PDF for {paper_id} to {pdf_path}")
+
+
+            async with aiofiles.open(meta_path_obj, "a", encoding="utf-8") as f:
+                await f.write(json.dumps(paper) + "\n")
+
+        except Exception as e:
+            pid = paper.get("paper_id") if isinstance(paper, dict) else None
+            print(f"Writer failed for {paper.get('paper_id')}: {e}")
+
+        finally:
+            queue.task_done()
 
             
             
@@ -298,8 +346,19 @@ async def main():
     ]
 
     # Start asynchronous writers for each output file
-    e_writer_task = asyncio.create_task(writer(extract_file_path, extracted_q))
-    ue_writer_task = asyncio.create_task(writer(unextracted_file_path, unextracted_q))
+    e_writer_task = asyncio.create_task(
+    writer(
+        extracted_q, 
+        Path(extract_meta_path), 
+        Path(pdf_file_dir)
+        )
+    )
+    ue_writer_task = asyncio.create_task(
+    writer(
+        unextracted_q, 
+        Path(unextracted_meta_path)
+        )
+    )
 
     # Wait for all worker tasks to complete
     await asyncio.gather(*extract_tasks)

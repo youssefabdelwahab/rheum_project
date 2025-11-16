@@ -9,6 +9,23 @@ import json
 import argparse
 import math
 import shlex, subprocess, sys
+from datetime import datetime
+from dotenv import load_dotenv
+load_dotenv()
+
+env_path = "/work/robust_ai_lab/shared/env_vars/rheum_project/env_vars.sh"  # export SCRIPT_ENV_FILE=/full/path/to/env_vars.sh
+if not env_path:
+    raise RuntimeError("SCRIPT_ENV_FILE is not set")
+
+env_path = str(Path(env_path).expanduser())
+ok = load_dotenv(dotenv_path=env_path, override=False)
+if not ok:
+    raise FileNotFoundError(f"Could not load env file at {env_path}")
+print("Loaded Env File")
+
+repo_root = os.getenv("ROOT_DIR")
+shared_folder = os.path.join(repo_root, "shared")
+log_folder_path= os.path.join(shared_folder,"logs/olmocr_logs")
 
 
 log_fh  = None
@@ -39,8 +56,8 @@ def start_vllm_server(model: str, port: int, max_model_len: Optional[int], gpu_m
     else:
         print("[WARN] project directory not set in environment variables — using ./localworkspace")
         root = Path("./localworkspace")
-
-    log_path = root / "shell_scripts" / "logs" / f"vllm_{job_id}.log"
+        
+    log_path = os.path.join(log_folder_path,  f"vllm_{job_id}.log" )
     log_path.parent.mkdir(parents=True, exist_ok=True)
 
     gpu_mem = float(gpu_mem)

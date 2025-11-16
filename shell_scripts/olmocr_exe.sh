@@ -5,9 +5,9 @@
 #SBATCH --gres=gpu:1              
 #SBATCH --cpus-per-task=5        
 #SBATCH --mem=80G                  # Total system RAM
-#SBATCH --time=00:45:00            # Adjust time as needed
-#SBATCH --output=/work/robust_ai_lab/rheum_project/shell_scripts/logs/olmocr_pdf_extract_%j.out
-#SBATCH --error=/work/robust_ai_lab/rheum_project/shell_scripts/logs/olmocr_pdf_extract_%j.err
+#SBATCH --time=24:00:00           # Adjust time as needed
+#SBATCH --output=/work/robust_ai_lab/shared/logs/sbatch_logs/olmocr_pdf_extract_%j.out
+#SBATCH --error=/work/robust_ai_lab/shared/logs/sbatch_logs/olmocr_pdf_extract_%j.err
 
 set -euo pipefail
 echo "Loading env vars"
@@ -16,10 +16,11 @@ source /work/robust_ai_lab/shared/env_vars/rheum_project/env_vars.sh
 #load env vars here 
 
 
-export INPUT_DIR="$" # set input path here
-export OUT_DIR="$" #set output path var here
+export INPUT_DIR="$PDF_INPUT_PATH" # set input path here
+export OUT_DIR="${PDF_OUT_PATH}_$(date +%s)" #set output path var here
 export CONDA_SH="$CONDA_RHEUM_VENV"
 export OLMOCR_CLIENT="$OLMOCR_SCRIPT_PATH"
+export PORT="$PORT_NUMBER"
 
 mkdir -p "${OUT_DIR}"
 
@@ -57,7 +58,7 @@ echo "[INFO] Starting Paper Extraction Process"
 srun -u --ntasks=1 --gres=gpu:1 \
   python "${OLMOCR_SCRIPT_PATH}"\
   --model-name allenai/olmOCR-7B-0725-FP8 \
-  --port 5000 \
+  --port "${PORT}" \
   --max-model-len 24576 \
   --gpu-memory-utilization 0.95 \
   --out-dir "${OUT_DIR}" \

@@ -32,9 +32,10 @@ module load cuda/12.6
 module load gcc/13.3
 
 
-: "${env_vars:?set in env_vars.sh}"
 echo "Activating venv"
 source "${CONDA_RHEUM_VENV}"
+conda activate olmocr || { echo "Conda activate failed"; exit 1; }
+
 
 
 echo "[DBG] Host: $(hostname)"
@@ -57,7 +58,7 @@ echo "[INFO] Starting Paper Extraction Process"
 
 srun -u --ntasks=1 --gres=gpu:1 \
   python "${OLMOCR_SCRIPT_PATH}"\
-  --model-name allenai/olmOCR-7B-0725-FP8 \
+  --model-name allenai/olmOCR-2-7B-1025-FP8 \
   --port "${PORT}" \
   --max-model-len 24576 \
   --gpu-memory-utilization 0.95 \

@@ -24,6 +24,9 @@ if not ok:
 print("Loaded Env File")
 
 repo_root = os.getenv("ROOT_DIR")
+if repo_root is None: 
+    repo_root = os.getcwd()
+
 shared_folder = os.path.join(repo_root, "shared")
 log_folder_path= os.path.join(shared_folder,"logs/olmocr_logs")
 
@@ -48,16 +51,17 @@ def parse_args():
 
 def start_vllm_server(model: str, port: int, max_model_len: Optional[int], gpu_mem: float):
     job_id = os.environ.get("SLURM_JOB_ID", "local")
-    proj_dir = os.environ["RHEUM_PROJ_DIR"] 
-    root = Path(os.path.expanduser(os.path.expandvars(proj_dir))).resolve()
-    if not root.exists():
-        print(f"[WARN] project dir path not found in environment variables: {root} — using ./localworkspace")
-        root = Path("./localworkspace")
-    else:
-        print("[WARN] project directory not set in environment variables — using ./localworkspace")
-        root = Path("./localworkspace")
+    proj_dir = os.environ.get("RHEUM_PROJ_DIR")
+    if proj_dir: 
+        root = Path(os.path.expanduser(os.path.expandvars(proj_dir))).resolve()
+        if not root.exists():
+            print(f"[WARN] project directory {root} does not exist — using ./localworkspace")
+            root = Path("./localworkspace").resolve()
+    else: 
+        print("[WARN] project dir path not set — using ./localworkspace")
+        root = Path("./localworkspace").resolve()
         
-    log_path = os.path.join(log_folder_path,  f"vllm_{job_id}.log" )
+    log_path = Path(log_folder_path) / f"vllm_{job_id}.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
 
     gpu_mem = float(gpu_mem)

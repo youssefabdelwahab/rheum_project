@@ -1,6 +1,5 @@
 import atexit
 import os
-import sys
 import time
 from pathlib import Path
 from typing import Optional
@@ -9,29 +8,6 @@ import json
 import argparse
 import math
 import shlex, subprocess, sys
-from datetime import datetime
-from dotenv import load_dotenv
-load_dotenv()
-
-env_path = "/work/robust_ai_lab/shared/env_vars/rheum_project/env_vars.sh"  # export SCRIPT_ENV_FILE=/full/path/to/env_vars.sh
-if not env_path:
-    raise RuntimeError("SCRIPT_ENV_FILE is not set")
-
-env_path = str(Path(env_path).expanduser())
-ok = load_dotenv(dotenv_path=env_path, override=False)
-if not ok:
-    raise FileNotFoundError(f"Could not load env file at {env_path}")
-print("Loaded Env File")
-
-repo_root = os.getenv("ROOT_DIR")
-if repo_root is None: 
-    repo_root = os.getcwd()
-
-shared_folder = os.path.join(repo_root, "shared")
-log_folder_path= os.path.join(shared_folder,"logs/olmocr_logs")
-
-
-log_fh  = None
 
 
 
@@ -39,29 +15,21 @@ def parse_args():
     ap = argparse.ArgumentParser(description="Serve vLLM and run a pipeline")
     ap.add_argument("--model-name", required=True, help="HF id or local path to the model")
     ap.add_argument("--port", type=int, default=8000, help="Port to run the server on (default: 8000)")
-    ap.add_argument("--max-model-len", type=int, default=None, help="Override max tokens; if omitted, model default is used")
-    ap.add_argument("--gpu-memory-utilization", type=float, default=0.9, help="Fraction of GPU memory to use (0–1, default: 0.9)")
-    ap.add_argument("--out-dir", type=Path, required=True, help="Directory to write outputs/logs")
+    ap.add_argument("--max-model-len", type=int, default=24576, help="Override max tokens; if omitted, model default is used")
+    ap.add_argument("--max-num-seqs", type=int, default=32, help="Max number of sequences per iteration (throttling)")
+    ap.add_argument("--gpu-memory-utilization", type=float, default=0.95, help="Fraction of GPU memory to use (0–1, default: 0.9)")
+    ap.add_argument("--out-dir", type=Path, required=False, default=Path('./pdfsoutput'), help="Directory to write outputs/logs")
     ap.add_argument("--markdown", action="store_true", help="If set, save outputs in Markdown format")
     ap.add_argument("--input-dir", type=Path, required=True, help="Directory containing PDFs")
     ap.add_argument("--recursive", action="store_true", help="Recurse into subdirectories for PDFs")
-    ap.add_argument("--pattern", default=None, help="Optional additional Path.match() pattern to filter PDFs")
+    ap.add_argument("--pattern", required=False, default=None, help="Optional additional Path.match() pattern to filter PDFs")
+    ap.add_argument("--log_dir", type=Path, required=False, default=('./localworkspace'),help='Default will be ./localworkspace')
     return ap.parse_args()
 
 
-def start_vllm_server(model: str, port: int, max_model_len: Optional[int], gpu_mem: float):
+def start_vllm_server(model: str, port: int, max_model_len: Optional[int], gpu_mem: float, max_num_seqs: Optional[int], log_dir:Path):
     job_id = os.environ.get("SLURM_JOB_ID", "local")
-    proj_dir = os.environ.get("RHEUM_PROJ_DIR")
-    if proj_dir: 
-        root = Path(os.path.expanduser(os.path.expandvars(proj_dir))).resolve()
-        if not root.exists():
-            print(f"[WARN] project directory {root} does not exist — using ./localworkspace")
-            root = Path("./localworkspace").resolve()
-    else: 
-        print("[WARN] project dir path not set — using ./localworkspace")
-        root = Path("./localworkspace").resolve()
-        
-    log_path = Path(log_folder_path) / f"vllm_{job_id}.log"
+    log_path = Path(log_dir) / f"olmocr_vllm_{job_id}.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
 
     gpu_mem = float(gpu_mem)
@@ -78,10 +46,13 @@ def start_vllm_server(model: str, port: int, max_model_len: Optional[int], gpu_m
 
     if max_model_len is not None:
         cmd += ["--max-model-len", str(max_model_len)]
-    global log_fh
+
+    if max_num_seqs is not None:
+        cmd += ["--max-num-seqs", str(max_num_seqs)]
+
+    
     log_fh = open(log_path, "w")
 
-    # Launch in background, fully detached from this process’ stdio
     proc = subprocess.Popen(
         cmd,
         stdout=log_fh,
@@ -111,7 +82,7 @@ def start_vllm_server(model: str, port: int, max_model_len: Optional[int], gpu_m
 
 def wait_for_vllm_health(
     port: int,
-    proc: Optional["subprocess.Popen"] = None,   # pass the Popen if you have it
+    proc: Optional["subprocess.Popen"] = None,  
     max_wait_min: int = 60,
     sleep_secs: float = 2.0,
         ) -> None:
@@ -165,7 +136,7 @@ def api_call_check(
     names = {m.get("id") for m in data.get("data", [])}
     if model_name not in names: 
         raise RuntimeError( 
-            "Model '{model_name}' not listed by /v1/models. Found: {sorted(names)}"
+            f"Model '{model_name}' not listed by /v1/models. Found: {sorted(names)}"
         )
         
 
@@ -207,7 +178,6 @@ def list_pdfs(base: Path, recursive: bool, pattern: str | None):
         it2 = base.glob("*.PDF")
     files = list(it) + list(it2)
     if pattern:
-        # simple post-filter using Path.match
         files = [p for p in files if p.match(pattern)]
     return sorted(set(files))
 
@@ -222,6 +192,8 @@ def main():
     port=args.port,
     max_model_len=args.max_model_len,
     gpu_mem=args.gpu_memory_utilization,
+    max_num_seqs=args.max_num_seqs,
+    log_dir=args.log_dir
     )
 
     wait_for_vllm_health(port=args.port, proc=proc)
@@ -244,13 +216,13 @@ def main():
     try:
         run_olmocr_pipeline(
             port=args.port,
-            input_dir= args.input_dir,  # or pass expanded list if olmocr supports multiple
+            input_dir= args.input_dir,  
             out_dir=args.out_dir,
             markdown=args.markdown,
             log_fh=log_fh,
         )
     finally:
-        # Stop server explicitly; atexit also cleans up
+        #clean up
         if proc.poll() is None:
             try:
                 proc.terminate()

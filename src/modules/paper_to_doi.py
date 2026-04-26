@@ -1,4 +1,4 @@
-from docling.document_converter import DocumentConverter
+# from docling.document_converter import DocumentConverter
 import requests, re, time, os
 
 CROSSREF_API_WAIT = 1/50 +0.05

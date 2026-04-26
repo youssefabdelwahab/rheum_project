@@ -13,11 +13,11 @@ build/
 setup_folder/compile_exl.py
 setup_folder/setup_env.py
 /testing/
+/depricated/
 
 # Virtual envs
 .venv/
 .venv*/
-env*/
 venv*/
 
 
@@ -44,3 +44,6 @@ git-lfs.tar.gz
 #shell
 shell_scripts/compile_exl.sh
 shell_scripts/download_hf.sh
+
+
+/work/robust_ai_lab/rheum_project/shell_scripts/olmocr-pipeline-debug.log

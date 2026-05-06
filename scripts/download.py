@@ -22,10 +22,10 @@ logger = logging.getLogger(__name__)
 
 def parse_args(): 
     ap = argparse.ArgumentParser(description="Download Paper PDFS")
-    ap.add_argument('--dir', required=True, type=Path, description='File Dir')
-    ap.add_argument('--paper_meta_file' , required=True, type=Path, description='input file that contains paper links')
-    ap.add_argument('--pdf_save_dir' , required=True, type=Path, description='Dir to Save Downloaded PDFS')
-    ap.add_argument("--num_workers" , required=True, type=int, description= 'Worker Allocation')
+    ap.add_argument('--dir', required=True, type=Path, help='File Dir')
+    ap.add_argument('--paper_meta_file' , required=True, type=Path, help='input file that contains paper links')
+    ap.add_argument('--pdf_save_dir' , required=True, type=Path, help='Dir to Save Downloaded PDFS')
+    ap.add_argument("--num_workers" , required=True, type=int, help= 'Worker Allocation')
     ap.add_argument('--log_dir', type=Path, required=False, default=Path('./localworkspace'),help='Default will be ./localworkspace')
     return ap.parse_args()
 
@@ -38,13 +38,13 @@ HEADERS = {
     "Cache-Control": "no-cache",
 }
 
-PAPER_DOWNLOAD_LOGGING_DICT = { 
-    "Paper_Id":'',
-    "url_1":'',
-    "url_2":'',
-    "PDF_Extracted":'',
-    "Error":''
-}
+# PAPER_DOWNLOAD_LOGGING_DICT = { 
+#     "Paper_Id":'',
+#     "url_1":'',
+#     "url_2":'',
+#     "PDF_Extracted":'',
+#     "Error":''
+# }
 
 
 
@@ -137,15 +137,18 @@ async def download_one_paper(paper_info):
     raw_urls = [paper_info.get('url_1'), paper_info.get('url_2')]
     urls_to_try = [u for u in raw_urls if u]
 
+    log_dict = {
+        "Paper_Id": paper_id,
+        "url_1": raw_urls[0] if raw_urls and len(raw_urls) > 0 else "",
+        "url_2": raw_urls[1] if raw_urls and len(raw_urls) > 1 else "",
+        "PDF_Extracted": False,
+        "Error": ""
+    }
+
     if not urls_to_try:
         paper_info["error"] = "No URLs provided"
-        PAPER_DOWNLOAD_LOGGING_DICT.update(
-                Paper_Id=paper_id, 
-                PDF_Extracted=False,
-                Error="No URLs Given"
-            
-            )
-        logging.info(PAPER_DOWNLOAD_LOGGING_DICT)
+        log_dict["Error"] = "No URLs provided"
+        logging.info(log_dict)
         return None, paper_info
     
     # We use AsyncSession for non-blocking HTTP requests
@@ -185,15 +188,8 @@ async def download_one_paper(paper_info):
                     
                     if landing_resp.status_code == 403:
                         # print(f"    [!] [{paper_id}] 403 on landing. Rotating mask...")
-                        PAPER_DOWNLOAD_LOGGING_DICT.update(
-                                Paper_Id=paper_id, 
-                                url_1=raw_urls[0] if raw_urls[0] else "",
-                                url_2=raw_urls[1] if raw_urls[1] else "",
-                                PDF_Extracted=False,
-                                Error=landing_resp.status_code 
-            
-                        )
-                        logger.info(PAPER_DOWNLOAD_LOGGING_DICT)
+                        log_dict["Error"] = landing_resp.status_code
+                        logger.info(log_dict)
                         continue 
 
                     final_landing_url = landing_resp.url
@@ -280,29 +276,14 @@ async def download_one_paper(paper_info):
 
                     if pdf_resp.status_code == 403:
                         # print(f"    [!] [{paper_id}] 403 on PDF. Rotating mask...")
-                        PAPER_DOWNLOAD_LOGGING_DICT.update(
-                                Paper_Id=paper_id, 
-                                url_1=raw_urls[0] if raw_urls[0] else "",
-                                url_2=raw_urls[1] if raw_urls[1] else "",
-                                PDF_Extracted=False,
-                                Error=pdf_resp.status_code
-            
-                        )
-                        logger.info(PAPER_DOWNLOAD_LOGGING_DICT)
+                        log_dict["Error"] = "403 Forbidden on PDF target"
+                        logger.info(log_dict)
                         continue 
                     
                     else:
                         error = f"PDF req failed ({pdf_resp.status_code})"
-                        PAPER_DOWNLOAD_LOGGING_DICT.update(
-                                Paper_Id=paper_id, 
-                                url_1=raw_urls[0] if raw_urls[0] else "",
-                                url_2=raw_urls[1] if raw_urls[1] else "",
-                                PDF_Extracted=False,
-                                Error=error
-            
-                        )
-                        logger.info(PAPER_DOWNLOAD_LOGGING_DICT)
-                        
+                        log_dict["Error"] = error
+                        logger.info(log_dict)
                         break 
 
                 except Exception as e:
@@ -342,8 +323,8 @@ async def load_papers_from_jsonl(input_file: Path, task_queue: asyncio.Queue):
                 # Normalize input for the worker
                 task_item = {
                     "paper_id": paper_id,
-                    "url_1": paper_data.get('cross_ref_paper_doi'),
-                    "url_2": paper_data.get('cross_ref_paper_doi') 
+                    "url_1": paper_data.get('cross_ref_paper_link'),
+                    "url_2": paper_data.get('cross_ref_paper_license') 
                 }
                 
                 await task_queue.put(task_item)
@@ -386,14 +367,13 @@ async def worker_pdf_downloader(pdf_fir:Path,
                 pdf_bytes, result_meta = await download_one_paper(paper_info)
                 
                 if pdf_bytes:
-                    PAPER_DOWNLOAD_LOGGING_DICT.update(
-                        Paper_id= paper_info.get('paper_id'),
-                        url_1 = paper_info.get('url_1', ""),
-                        url_2 = paper_info.get('url_2', ""),
-                        PDF_Extracted = True,
-                        Error = 'No Error'
-                    )
-                    logger.info(PAPER_DOWNLOAD_LOGGING_DICT)
+                    logger.info({
+                        "Paper_Id": paper_info.get('paper_id'),
+                        "url_1": paper_info.get('url_1', ""),
+                        "url_2": paper_info.get('url_2', ""),
+                        "PDF_Extracted": True,
+                        "Error": "No Error"
+                    })
                     result_meta["pdf_bytes"] = pdf_bytes # Pass bytes to writer
                     await extracted_queue.put(result_meta)
                 else:

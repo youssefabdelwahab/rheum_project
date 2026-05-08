@@ -49,3 +49,6 @@ shell_scripts/download_hf.sh
 
 
 /work/robust_ai_lab/rheum_project/shell_scripts/olmocr-pipeline-debug.log
+
+
+shell_scripts/

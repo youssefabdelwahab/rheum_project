@@ -19,7 +19,7 @@ def parse_args():
     ap.add_argument("--max-num-seqs", type=int, default=32, help="Max number of sequences per iteration (throttling)")
     ap.add_argument("--gpu-memory-utilization", type=float, default=0.95, help="Fraction of GPU memory to use (0–1, default: 0.9)")
     ap.add_argument("--out-dir", type=Path, required=False, default=Path('./pdfsoutput'), help="Directory to write outputs/logs")
-    ap.add_argument("--markdown", action="store_true", help="If set, save outputs in Markdown format")
+    ap.add_argument("--markdown", action="store_true", required=False, help="If set, save outputs in Markdown format")
     ap.add_argument("--input-dir", type=Path, required=True, help="Directory containing PDFs")
     ap.add_argument("--recursive", action="store_true", help="Recurse into subdirectories for PDFs")
     ap.add_argument("--pattern", required=False, default=None, help="Optional additional Path.match() pattern to filter PDFs")

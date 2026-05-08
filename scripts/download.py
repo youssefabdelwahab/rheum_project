@@ -22,10 +22,10 @@ logger = logging.getLogger(__name__)
 
 def parse_args(): 
     ap = argparse.ArgumentParser(description="Download Paper PDFS")
-    ap.add_argument('--dir', required=True, type=Path, help='File Dir')
     ap.add_argument('--paper_meta_file' , required=True, type=Path, help='input file that contains paper links')
     ap.add_argument('--pdf_save_dir' , required=True, type=Path, help='Dir to Save Downloaded PDFS')
     ap.add_argument("--num_workers" , required=True, type=int, help= 'Worker Allocation')
+    ap.add_argument('--unextracted_dir', required=False, default=Path('./localworkspace'), type=Path, help='Dir to Save Unextracted Paper Metadata')
     ap.add_argument('--log_dir', type=Path, required=False, default=Path('./localworkspace'),help='Default will be ./localworkspace')
     return ap.parse_args()
 
@@ -435,11 +435,13 @@ async def main():
 
     ap = parse_args()
     num_workers = ap.num_workers
-    main_dir = ap.dir
     input_file = ap.paper_meta_file
     pdf_dir = ap.pdf_save_dir
-    extracted_paper_meta_path = main_dir / f"extracted_paper_meta_{date.today():%Y-%m-%d}.json"
-    unextracted_paper_meta_path = main_dir / f"unextracted_paper_meta_{date.today():%Y-%m-%d}.json"
+    unextracted_dir = ap.unextracted_dir
+
+    prefix = Path(pdf_dir).name
+    extracted_paper_meta_path = pdf_dir / f"extracted_paper_meta_{date.today():%Y-%m-%d}.json"
+    unextracted_paper_meta_path = unextracted_dir / f"{prefix}_pdf_unextracted_paper_meta_{date.today():%Y-%m-%d}.json"
     ap.log_dir.mkdir(parents=True, exist_ok=True)
     log_file_path = ap.log_dir / f"pdf_extraction_{date.today():%Y-%m-%d}.log"
     

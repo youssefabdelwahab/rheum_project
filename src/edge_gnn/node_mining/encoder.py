@@ -9,8 +9,7 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 model = SentenceTransformer(MODEL_NAME, device=device)
 
 
-def encode_sentences(sentences: list[str], batch_size: int = 8) -> torch.Tensor: 
-
+def encode_sentence_nodes(sentences: list[str], batch_size: int = 8) -> torch.Tensor: 
     X = model.encode(
         sentences, 
         batch_size=batch_size, 

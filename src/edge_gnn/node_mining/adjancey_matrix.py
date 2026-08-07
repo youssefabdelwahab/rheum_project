@@ -6,12 +6,6 @@ nlp = spacy.load("en_core_sci_sm")
 
 
 
-# class DocumentGraphBuilder: 
-#     def __init__(self, model_name: str = "NeuML/pubmedbert-base-embeddings"):
-#         ""
-        
-#         self.encoder = SentenceTransformer(model_name)
-
         
 
 def generate_sentence_nodes(raw_paper_text): 

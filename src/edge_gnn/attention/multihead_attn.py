@@ -2,7 +2,6 @@ import torch
 import math
 import torch.nn as nn 
 from torch_geometric.utils import add_self_loops, softmax 
-from torch_scatter import scatter_add 
 from src.edge_gnn.positional_encoding.wire import WireEngine
 
 class MultiHead_Attention(nn.Module): 
@@ -22,8 +21,8 @@ class MultiHead_Attention(nn.Module):
 
         self.W_q = nn.Linear(in_features, out_features, bias=False)
         self.W_k = nn.Linear(in_features, out_features, bias=False)
-        self.W_v = nn.Linear(in_features, out_features, bias=False)
-        self.W_o = nn.Linear(out_features, out_features, bias=False)
+        # self.W_v = nn.Linear(in_features, out_features, bias=False)
+        # self.W_o = nn.Linear(out_features, out_features, bias=False)
 
         self.wire_engine = WireEngine(k_freq=k_freq, d_attention=self.head_dim)
 
@@ -41,13 +40,13 @@ class MultiHead_Attention(nn.Module):
         """
         num_nodes = x.size(0)
         
-        edge_index, _ = add_self_loops(edge_index, num_nodes=num_nodes)
+        # edge_index, _ = add_self_loops(edge_index, num_nodes=num_nodes)
         
         source_nodes, target_nodes = edge_index[0], edge_index[1]
 
         q = self.W_q(x).view(num_nodes, self.num_heads, self.head_dim)
         k = self.W_k(x).view(num_nodes, self.num_heads, self.head_dim)
-        v = self.W_v(x).view(num_nodes, self.num_heads, self.head_dim)
+        # v = self.W_v(x).view(num_nodes, self.num_heads, self.head_dim)
 
         sin, cos = self.wire_engine(wire_coordinates)
 
@@ -59,17 +58,17 @@ class MultiHead_Attention(nn.Module):
 
         q_target = q_rotated[target_nodes]
         k_source = k_rotated[source_nodes]
-        v_source = v[source_nodes]
+        # v_source = v[source_nodes]
 
         attention_scores = (q_target * k_source).sum(dim=-1) / math.sqrt(self.head_dim)
 
         attention_weights = softmax(attention_scores, target_nodes, num_nodes=num_nodes)
         
-        weighted_values = v_source * attention_weights.unsqueeze(-1)
+        # weighted_values = v_source * attention_weights.unsqueeze(-1)
         
-        out = torch.zeros(num_nodes, self.num_heads, self.head_dim, device=x.device)
-        scatter_add(weighted_values, target_nodes, dim=0, out=out)
+        # out = torch.zeros(num_nodes, self.num_heads, self.head_dim, device=x.device)
+        # scatter_add(weighted_values, target_nodes, dim=0, out=out)
         
-        out = out.view(num_nodes, self.out_features)
+        # out = out.view(num_nodes, self.out_features)
         
-        return self.W_o(out)
+        return attention_weights

@@ -1,98 +1,84 @@
 import torch 
 import spacy
-from torch_geometric.utils import degree
-
+from torch_geometric.utils import coalesce, to_undirected
 nlp = spacy.load("en_core_sci_sm")
 
 
 
         
-
 def generate_sentence_nodes(raw_paper_text): 
+    """
+    Parses raw clinical text into a list of discrete sentence nodes.
+
+    This function utilizes the 'en_core_sci_sm' spaCy model to perform accurate 
+    sentence boundary detection on scientific and clinical text. It automatically 
+    strips leading/trailing whitespace and filters out any sentences that are 10 
+    characters or shorter to remove noise (e.g., stray punctuation or isolated numbers).
+
+    Args:
+        raw_paper_text (str): The raw, unformatted text of the document.
+
+    Returns:
+        list[str]: A list of cleaned sentence strings, where each string represents 
+            a single node in the document graph.
+    """
 
     doc = nlp(raw_paper_text)
     sentence_nodes = [sent.text.strip() for sent in doc.sents if len(sent.text.strip()) > 10]
     return sentence_nodes
 
 
-def sequential_matrix(num_nodes: int, bidirectional:bool = True) -> tuple[torch.Tensor, torch.Tensor]:
+def sequential_matrix(num_nodes: int, bidirectional: bool = True) -> torch.Tensor:
     """
-    Generate a sequential graph backbone for a given number of nodes.
+    Generates a structural backbone graph connecting sequential nodes.
+
+    This creates the foundational physical topology of the document, where sentence i 
+    is connected to sentence i+1 (e.g., 0 -> 1, 1 -> 2). This allows the network to 
+    understand the natural reading order of the text.
 
     Args:
-        num_nodes (int): The number of nodes in the graph.
-        bidirectional (bool): Whether to create a bidirectional graph. Default is True.
+        num_nodes (int): The total number of sentence nodes in the document.
+        bidirectional (bool, optional): If True, edges are mirrored so that information 
+            can flow both forwards and backwards (e.g., 0 <-> 1). Defaults to True.
 
-    
     Returns:
-        dge_index: Shape [2, E] tensor of source -> target node pairs (PyG standard format).
-        adj_matrix: Shape [num_nodes, num_nodes] binary adjacency matrix.
+        torch.Tensor: A sparse graph connectivity tensor (edge_index) of shape [2, E], 
+            where E is the number of sequential edges.
     """
-
-    source_nodes = torch.arange(0 , num_nodes - 1, dtype=torch.long)
+ 
+    # forward sequential edges (0->1, 1->2, etc.)
+    source_nodes = torch.arange(0, num_nodes - 1, dtype=torch.long)
     target_nodes = torch.arange(1, num_nodes, dtype=torch.long)
+    edge_index = torch.stack([source_nodes, target_nodes], dim=0)
 
+    # bidirectional mirroring 
     if bidirectional:
-        full_source_nodes = torch.cat([source_nodes, target_nodes])
-        full_target_nodes = torch.cat([target_nodes, source_nodes])
-    else: 
-        full_source_nodes = source_nodes
-        full_target_nodes = target_nodes
+        edge_index = to_undirected(edge_index, num_nodes=num_nodes)
 
-    edge_index = torch.stack([full_source_nodes, full_target_nodes], dim=0)
-
-    adj_matrix = torch.zeros((num_nodes, num_nodes), dtype=torch.float32)
-    adj_matrix[edge_index[0], edge_index[1]] = 1.0
-    return edge_index , adj_matrix
+    return edge_index
 
 
-def knn_matrix(X: torch.Tensor, k:int = 3) -> torch.Tensor:
+def merge_graphs(seq_edge_index: torch.Tensor, knn_edge_index: torch.Tensor, num_nodes: int) -> torch.Tensor:
     """
-    Computes k-nearest neighbor semantic edges based on cosine similarity.
-    
+    Fuses multiple edge indices into a single, optimized graph topology.
+
+    This function combines the structural backbone (sequential edges) and the semantic 
+    shortcuts (k-NN edges). It utilizes PyTorch Geometric's `coalesce` function to 
+    automatically remove any duplicate/overlapping edges and sort the resulting matrix 
+    by source node, which is required for efficient message passing and scatter operations.
+
     Args:
-        X: Feature tensor of shape [num_nodes, embedding_dim] (already L2 normalized).
-        k: Number of semantic neighbors to connect per node.
+        seq_edge_index (torch.Tensor): The sequential edge index of shape [2, E_seq].
+        knn_edge_index (torch.Tensor): The semantic k-NN edge index of shape [2, E_knn].
+        num_nodes (int): The total number of nodes in the graph (used by coalesce for 
+            bounds checking and proper sorting).
+
     Returns:
-        edge_index_knn: Shape [2, E_knn] tensor of semantic connections.
+        torch.Tensor: A single, deduplicated, and sorted edge index of shape [2, E_total] 
+            representing the unified graph topology.
     """
-
-    num_nodes = X.size(0)
-
-    similarity_matrix = torch.mm(X,X.T)
-
-    similarity_matrix.fill_diagonal_(-float("inf")) 
-
-    _ , topk_indicies = torch.topk(similarity_matrix, k=k, dim=1)
-
-    source_nodes = torch.arange(num_nodes, dtype=torch.long).repeat_interleave(k)
-    target_nodes = topk_indicies.reshape(-1)
-
-    edge_index_knn = torch.stack([source_nodes, target_nodes], dim=0)
-
-    return edge_index_knn
-
-def merge_graphs(seq_edge_index:torch.Tensor, knn_edge_index:torch.Tensor) -> torch.Tensor: 
-    """
-    Combines the sequential backbone and k-NN semantic edges into a single 
-    unified graph, automatically deduplicating overlapping edges.
-    """
-
+ 
     unified_edges = torch.cat([seq_edge_index, knn_edge_index], dim=1)
-    unified_edges = torch.unique(unified_edges, dim=1)
+    unified_edges = coalesce(unified_edges, num_nodes=num_nodes)
 
     return unified_edges
-
-def degree_matrix(edge_index: torch.Tensor, num_nodes: int) -> torch.Tensor:
-    """
-    Computes the sparse normalized degree vector D^{-1/2} used by PyG for 
-    symmetric normalization in GCN layers without creating an N x N diagonal grid.
-    """
-    # Count how many times each node appears as a source in edge_index[0]
-    row_degrees = degree(edge_index[0], num_nodes=num_nodes, dtype=torch.float32)
-
-    # Compute D^{-1/2} for symmetric normalization (handling division by zero)
-    deg_inv_sqrt = row_degrees.pow(-0.5)
-    deg_inv_sqrt[deg_inv_sqrt == float('inf')] = 0.0
-
-    return deg_inv_sqrt

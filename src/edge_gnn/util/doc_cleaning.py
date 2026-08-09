@@ -184,7 +184,7 @@ def process_document_line_by_line(raw_md_text: str) -> str:
 
 
 def clean_and_preserve_exact_structure(raw_md_text: str) -> str:
-    # Split strictly by newline character to preserve exact vertical spacing
+    # split  strictly by newline character 
     lines = raw_md_text.split('\n') 
     output_lines = []
     
@@ -193,11 +193,10 @@ def clean_and_preserve_exact_structure(raw_md_text: str) -> str:
     table_counter = 1
     
     for line in lines:
-        # If we hit a line starting with References, we stop appending to output_lines
         if re.match(r'^#*\s*(REFERENCES|ACKNOWLEDGMENT|ACKNOWLEDGMENTS)', line.strip(), re.IGNORECASE):
             break 
             
-        # 2. TABLE ISOLATION
+        #isolate tables
         if '<table' in line.lower():
             in_table = True
             table_buffer.append(line)
@@ -208,12 +207,12 @@ def clean_and_preserve_exact_structure(raw_md_text: str) -> str:
             if '</table>' in line.lower():
                 in_table = False
                 
-                # Convert the HTML block to sentences
+                # convert the HTML block to sentences
                 table_html = "\n".join(table_buffer)
                 linearized = linearize_html_table(table_html, table_id=table_counter)
                 table_counter += 1
                 
-                # Append the new sentences as a single line to replace the table block
+                #append the new sentences as a single line to replace the table block
                 output_lines.append(linearized)
                 table_buffer = []
             continue

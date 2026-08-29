@@ -1,7 +1,7 @@
 import torch 
 import math
 import torch.nn as nn 
-from torch_geometric.utils import add_self_loops, softmax 
+from torch_geometric.utils import softmax 
 from src.edge_gnn.positional_encoding.wire import WireEngine
 
 class MultiHead_Attention(nn.Module): 

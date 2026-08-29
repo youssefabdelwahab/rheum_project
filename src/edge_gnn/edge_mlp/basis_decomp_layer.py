@@ -33,16 +33,25 @@ class Basis_Layer(nn.Module):
         nn.init.xavier_normal_(self.basis_vector_bank)
 
 
-    def forward(self, relation_vector: torch.Tensor): 
+    def forward(self, relation_vector: torch.Tensor, source_features: torch.Tensor, chunk_size: int = 1024) -> torch.Tensor: 
         """
-        Computes the edge-specific transformation matrices via tensor contraction.
+        Computes the edge-specific transformation via a tightly chunked tensor contraction.
 
-        Args:
-            relation_vector (torch.Tensor): The edge coefficients of shape [E, B], where E is 
-                the number of edges in the batch.
-
-        Returns:
-            torch.Tensor: The dynamically mixed transformation matrices for each edge, 
-                resulting in a shape of [E, d_length, d_length].
+        By keeping the chunk size small (e.g., 1024), the ephemeral workspace memory required 
+        by PyTorch's einsum backend is strictly bound to ~250 MiB, allowing it to fit into 
+        the remaining VRAM on large graphs.
         """
-        return torch.einsum("eb, bij -> eij" , relation_vector , self.basis_vector_bank)
+        E = relation_vector.size(0)
+        outputs = []
+        
+        # Iterate over the edges in smaller chunks
+        for i in range(0, E, chunk_size):
+            rel_chunk = relation_vector[i:i + chunk_size]
+            src_chunk = source_features[i:i + chunk_size]
+            
+            # The intermediate memory spike is now bounded by chunk_size
+            chunk_out = torch.einsum("eb, bij, ej -> ei", rel_chunk, self.basis_vector_bank, src_chunk)
+            outputs.append(chunk_out)
+            
+        # Reconstruct the full graph messages
+        return torch.cat(outputs, dim=0)

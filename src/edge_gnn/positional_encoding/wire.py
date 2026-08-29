@@ -100,6 +100,19 @@ class WireEngine(nn.Module):
             # Copy into the linear layer weights
             self.omega_matrix.weight.copy_(rand_freqs / decay_factors)
 
+    def forward(self, wire_coords: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        """
+        Calculates the sine and cosine frequency matrices from the topological coordinates.
+        
+        Args:
+            wire_coords (torch.Tensor): Topological coordinates of shape [..., k_freq]
+            
+        Returns:
+            tuple[torch.Tensor, torch.Tensor]: The (sin, cos) tensors, each of shape [..., d_half]
+        """
+        freqs = self.omega_matrix(wire_coords)
+        return torch.sin(freqs), torch.cos(freqs)
+
     def rotate(self, x: torch.Tensor, sin: torch.Tensor, cos: torch.Tensor) -> torch.Tensor:
         """
         Applies a vectorized 2D rotary transformation to the input tensor.

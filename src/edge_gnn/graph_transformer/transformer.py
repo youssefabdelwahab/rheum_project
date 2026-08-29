@@ -106,6 +106,7 @@ class GraphFormer(nn.Module):
 
         weighted_messages = multi_head_messages * attention_weights.unsqueeze(-1)
 
+        #aggregation of messages after weighting them 
         agg_buffer = torch.zeros(num_nodes, self.num_heads, self.head_dim, device=x.device)
         scatter_add(weighted_messages, target_nodes, dim=0, out=agg_buffer)
     

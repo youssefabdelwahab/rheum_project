@@ -1,6 +1,7 @@
 
 import torch 
 import torch.nn as nn 
+from torch.utils.checkpoint import checkpoint
 from src.edge_gnn.graph_transformer.transformer import GraphFormer
 
 
@@ -39,7 +40,7 @@ class GlobalGraphNetwork(nn.Module):
         # 1. Input Projection
         self.input_encoder = nn.Linear(input_dim, hidden_dim)
         
-        # 2. The Deep Stack (e.g., 6 layers deep)
+        # 2. passing through the whole block
         self.layers = nn.ModuleList([
             GraphFormer(hidden_dim, num_heads, k_freq)
             for _ in range(num_layers)
@@ -79,11 +80,18 @@ class GlobalGraphNetwork(nn.Module):
         
         # Sequentially pass the graph through all layers
         for layer in self.layers:
-            x , layer_messages = layer(x, edge_index, wire_coords)
-            all_layer_messages.append(layer_messages)
 
+            x , layer_messages = checkpoint(
+                                    layer,
+                                    x, 
+                                    edge_index, 
+                                    wire_coords,
+                                    use_reentrant=False)
+            all_layer_messages.append(layer_messages)
+            # x is a topological vector containing context about all other conncted nodes 
             
         # Map the final enriched node embeddings to prediction classes
+        # x is a topological vector containing context about all other conncted nodes 
         logits = self.output_head(x)
         
         return logits , all_layer_messages , x

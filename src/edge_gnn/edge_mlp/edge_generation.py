@@ -91,7 +91,7 @@ class Edge_Generator(nn.Module):
         self.edge_embeddings = Holographic_Edge_Embeddings(d_length, hidden_dim)
         self.basis_vectors = Basis_Layer(d_length, B=d_length)
 
-    def forward(self, edge_index: torch.Tensor, node_embeddings: torch.Tensor): 
+    def forward(self, edge_index: torch.Tensor, node_embeddings: torch.Tensor, previous_edge_state=None): 
         """
         Executes the full edge message generation pipeline.
 
@@ -105,7 +105,7 @@ class Edge_Generator(nn.Module):
                 by the attention mechanism and aggregated at the target nodes.
         """
         # 1. Get relational coefficients [E, d_length]
-        edge_coefficients = self.edge_embeddings(edge_index, node_embeddings)
+        edge_coefficients, new_edge_state = self.edge_embeddings(edge_index, node_embeddings, previous_edge_state)
 
         # 2. Extract source features [E, d_length]
         source_nodes = edge_index[0]
@@ -114,4 +114,4 @@ class Edge_Generator(nn.Module):
         # 3. Compute transformed messages directly via associative contraction
         transformed_messages = self.basis_vectors(edge_coefficients, source_features)
         
-        return transformed_messages
+        return transformed_messages, new_edge_state

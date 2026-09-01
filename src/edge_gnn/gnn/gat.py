@@ -77,15 +77,16 @@ class GlobalGraphNetwork(nn.Module):
         # Map raw BERT/Text embeddings into the graph space
         x = self.input_encoder(x)
         all_layer_messages = []
-        
+        edge_memory = []
         # Sequentially pass the graph through all layers
         for layer in self.layers:
 
-            x , layer_messages = checkpoint(
+            x , layer_messages , edge_memory = checkpoint(
                                     layer,
                                     x, 
                                     edge_index, 
                                     wire_coords,
+                                    edge_memory,
                                     use_reentrant=False)
             all_layer_messages.append(layer_messages)
             # x is a topological vector containing context about all other conncted nodes 

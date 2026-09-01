@@ -72,7 +72,7 @@ class GraphFormer(nn.Module):
         )
 
 
-    def forward(self, x: torch.Tensor, edge_index: torch.Tensor, wire_coords: torch.Tensor):
+    def forward(self, x: torch.Tensor, edge_index: torch.Tensor, wire_coords: torch.Tensor, previous_edge_state=None):
         """
         Executes a single layer of graph message passing and node state updates.
 
@@ -100,7 +100,7 @@ class GraphFormer(nn.Module):
 
         attention_weights = self.attention_router(h1, edge_index, wire_coords)
 
-        transformed_messages = self.edge_generator(edge_index, h1)
+        transformed_messages current_edge_state = self.edge_generator(edge_index, h1, previous_edge_state)
 
         multi_head_messages = transformed_messages.view(-1, self.num_heads, self.head_dim)
 
@@ -127,5 +127,5 @@ class GraphFormer(nn.Module):
         # Second Residual Connection
         x = x + out2
         
-        return x , transformed_messages
+        return x , transformed_messages , current_edge_state
 

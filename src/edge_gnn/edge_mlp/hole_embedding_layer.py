@@ -32,6 +32,8 @@ class Holographic_Edge_Embeddings(nn.Module):
     def __init__(self, d_length:int , hidden_dim: int): 
         super().__init__()
         self.d = d_length 
+        self.memory_projector = nn.Linear(d_length, d_length)
+
         self.mlp = nn.Sequential( 
             nn.Linear(d_length, hidden_dim), 
             nn.GELU(), 
@@ -62,7 +64,7 @@ class Holographic_Edge_Embeddings(nn.Module):
 
         return source_node_embeddings, target_node_embeddings
 
-    def forward(self, edge_index: torch.Tensor, node_embeddings: torch.Tensor): 
+    def forward(self, edge_index: torch.Tensor, node_embeddings: torch.Tensor, previous_edge_state=None): 
         """
         Computes the refined holographic relation vector for each edge in the graph.
 
@@ -94,6 +96,10 @@ class Holographic_Edge_Embeddings(nn.Module):
         real_freq = torch.fft.irfft(raw_freq, n=self.d, dim=-1)
 
         final_edge_vector = real_freq.to(original_dtype)
+
+        # Integrate the memory from the previous GNN layer
+        if previous_edge_state is not None: 
+            final_edge_vector = final_edge_vector + self.memory_projector(previous_edge_state)
         
         output = self.mlp(final_edge_vector)
-        return self.layer_norm(output)
+        return self.layer_norm(output), final_edge_vector

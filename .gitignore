@@ -55,3 +55,9 @@ shell_scripts/
 
 test_scripts/
 test_shell_scripts/
+
+runs/
+test_scripts_fir/
+test_shell_scripts_fir/
+
+diagnostics/

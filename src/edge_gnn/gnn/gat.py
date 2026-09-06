@@ -77,7 +77,7 @@ class GlobalGraphNetwork(nn.Module):
         # Map raw BERT/Text embeddings into the graph space
         x = self.input_encoder(x)
         all_layer_messages = []
-        edge_memory = []
+        edge_memory = None
         # Sequentially pass the graph through all layers
         for layer in self.layers:
 

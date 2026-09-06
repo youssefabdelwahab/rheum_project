@@ -4,7 +4,7 @@
 import os
 import torch
 import torch.optim as optim
-from torch_geometric.datasets import Planetoid
+from torch_geometric.datasets import Planetoid, WikiCS
 from torch_geometric.loader import DataLoader
 from torch.optim.lr_scheduler import LinearLR, ReduceLROnPlateau, SequentialLR
 
@@ -122,7 +122,7 @@ def prepare_dataset(dataset_name: str, data_dir: str, k_freq: int = 8):
     elif dataset_name in ['Computers', 'Photo']:
         dataset = Amazon(root=os.path.join(data_dir, 'Amazon'), name=dataset_name)
     elif dataset_name == 'WikiCS':
-        dataset = WikiCS(root=os.path.join(data_dir, 'WikiCS'))
+        dataset = WikiCS(root=os.path.join(data_dir, 'WikiCS'), is_undirected=True)
     else:
         raise ValueError(f"Unknown dataset '{dataset_name}'.")
         

@@ -201,7 +201,7 @@ def train_pipeline(
     # Setup Experiment Logging Directory (Routed to Scratch Space)
     # ---------------------------------------------------------
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    base_run_dir = "/scratch/yous9/rheum_project_runs" # Explicitly routing to scratch
+    base_run_dir = "/project/def-amingh/rheum_project_data/training_runs/rheum_project_runs" # Explicitly routing to scratch
     
     if not resume_from_checkpoint:
         exp_dir = os.path.join(base_run_dir, f"{run_name}_{timestamp}")

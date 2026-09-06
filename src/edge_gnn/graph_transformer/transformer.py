@@ -100,7 +100,7 @@ class GraphFormer(nn.Module):
 
         attention_weights = self.attention_router(h1, edge_index, wire_coords)
 
-        transformed_messages current_edge_state = self.edge_generator(edge_index, h1, previous_edge_state)
+        transformed_messages ,current_edge_state = self.edge_generator(edge_index, h1, previous_edge_state)
 
         multi_head_messages = transformed_messages.view(-1, self.num_heads, self.head_dim)
 
